@@ -23,22 +23,20 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Install NSIS
-        run: |
-          choco install nsis -y
-          echo "C:\Program Files (x86)\NSIS" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
 
       - name: Build installer
-        run: makensis installer.nsi
+        run: iscc installer.iss
 
-      - name: Create ZIP
+      - name: Create portable ZIP
         run: |
-          Compress-Archive -Path target\release\vis_taskbar.exe, icon.ico, README.md, LICENSE, CHANGELOG.md -DestinationPath vis_taskbar-${{ github.ref_name }}-portable.zip
+          Compress-Archive -Path target\release\vis_taskbar.exe, icon.ico, README.md, LICENSE, CHANGELOG.md -DestinationPath vis_taskbar-${{ github.ref_name }}-windows-x64.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            vis_taskbar-*-setup.exe
-            vis_taskbar-*-portable.zip
+            vis_taskbar-setup.exe
+            vis_taskbar-*-windows-x64.zip
           generate_release_notes: true

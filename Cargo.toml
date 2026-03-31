@@ -3,6 +3,8 @@ name = "vis_taskbar"
 version = "0.5.1"
 edition = "2024"
 description = "Audio spectrum visualizer rendered on the Windows taskbar"
+authors = ["Vadim Kuras"]
+license = "MIT"
 
 [dependencies]
 windows = { version = "0.58", features = [
