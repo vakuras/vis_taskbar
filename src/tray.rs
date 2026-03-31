@@ -5,6 +5,8 @@ use windows::Win32::UI::Controls::Dialogs::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::*;
 
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+
 /// Tray icon manager.
 pub struct TrayIcon {
     hwnd: HWND,
@@ -28,7 +30,11 @@ impl TrayIcon {
                 uID: 459,
                 uFlags: NIF_ICON | NIF_TIP | NIF_MESSAGE,
                 uCallbackMessage: TRAY_MSG,
-                hIcon: LoadIconW(HINSTANCE::default(), IDI_APPLICATION)?,
+                // Load embedded icon (resource ID 1 set by winresource)
+                hIcon: {
+                    let hinstance: HINSTANCE = std::mem::transmute(GetModuleHandleW(None).unwrap_or_default());
+                    LoadIconW(hinstance, PCWSTR(1 as *const u16))?
+                },
                 ..std::mem::zeroed()
             };
 

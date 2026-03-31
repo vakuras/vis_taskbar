@@ -2,9 +2,11 @@ use crate::config::Settings;
 use crate::tray::{self, show_color_dialog};
 
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
 use windows::core::*;
 
 use std::sync::{Arc, Mutex};
@@ -25,8 +27,31 @@ const IDC_PEAK_COLOR_SWATCH: u32 = 1022;
 const IDC_APPLY: u32 = 1030;
 const IDC_RESET: u32 = 1031;
 const IDC_CLOSE: u32 = 1032;
+// Section labels (static text, no interaction)
+const IDC_SECTION_DISPLAY: u32 = 1040;
+const IDC_SECTION_TIMING: u32 = 1041;
+const IDC_SECTION_COLORS: u32 = 1042;
+const IDC_TOP_COLOR_LABEL: u32 = 1043;
+const IDC_BOTTOM_COLOR_LABEL: u32 = 1044;
+const IDC_PEAK_COLOR_LABEL: u32 = 1045;
 
 const PREFS_CLASS: PCWSTR = w!("VIS_PREFS_CLASS");
+
+// Eventide "Midnight" theme colors (COLORREF = 0x00BBGGRR)
+const BG_COLOR: u32 = 0x0028201E;       // #1e2028 base background
+const SURFACE_COLOR: u32 = 0x00362A28;  // #282a36 surface/card
+const OVERLAY_COLOR: u32 = 0x00211816;  // #161821 input/overlay
+const TEXT_COLOR: u32 = 0x00EDEAE8;     // #e8eaed primary text
+const TEXT_DIM: u32 = 0x00A6A09A;       // #9aa0a6 secondary text
+const ACCENT_COLOR: u32 = 0x00F8B48A;   // #8ab4f8 blue accent
+const ACCENT_HOVER: u32 = 0x00FACBAE;   // #aecbfa accent hover
+const BORDER_COLOR: u32 = 0x004A3B38;   // #383b4a border
+
+static mut BG_BRUSH: HBRUSH = HBRUSH(std::ptr::null_mut());
+static mut SURFACE_BRUSH: HBRUSH = HBRUSH(std::ptr::null_mut());
+static mut OVERLAY_BRUSH: HBRUSH = HBRUSH(std::ptr::null_mut());
+static mut UI_FONT: HFONT = HFONT(std::ptr::null_mut());
+static mut SECTION_FONT: HFONT = HFONT(std::ptr::null_mut());
 
 struct UiState {
     settings: Arc<Mutex<Settings>>,
@@ -47,14 +72,33 @@ pub fn run_ui(
     unsafe {
         let hinstance: HINSTANCE = std::mem::transmute(GetModuleHandleW(None).unwrap());
 
+        // Create dark background brush and fonts
+        BG_BRUSH = CreateSolidBrush(COLORREF(BG_COLOR));
+        SURFACE_BRUSH = CreateSolidBrush(COLORREF(SURFACE_COLOR));
+        OVERLAY_BRUSH = CreateSolidBrush(COLORREF(OVERLAY_COLOR));
+
+        let font_name: Vec<u16> = "Segoe UI".encode_utf16().chain(std::iter::once(0)).collect();
+        let mut lf: LOGFONTW = std::mem::zeroed();
+        lf.lfHeight = -14;
+        lf.lfWeight = 400; // FW_NORMAL
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        lf.lfFaceName[..font_name.len()].copy_from_slice(&font_name);
+        UI_FONT = CreateFontIndirectW(&lf);
+
+        lf.lfHeight = -13;
+        lf.lfWeight = 600; // FW_SEMIBOLD
+        SECTION_FONT = CreateFontIndirectW(&lf);
+
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: WNDCLASS_STYLES(0),
             lpfnWndProc: Some(prefs_wnd_proc),
             hInstance: hinstance,
             hCursor: LoadCursorW(HINSTANCE::default(), IDC_ARROW).unwrap_or_default(),
-            hbrBackground: HBRUSH((COLOR_BTNFACE.0 + 1) as *mut _),
+            hbrBackground: BG_BRUSH,
             lpszClassName: PREFS_CLASS,
+            hIcon: LoadIconW(hinstance, PCWSTR(1 as *const u16)).unwrap_or_default(),
+            hIconSm: LoadIconW(hinstance, PCWSTR(1 as *const u16)).unwrap_or_default(),
             ..std::mem::zeroed()
         };
 
@@ -71,21 +115,27 @@ pub fn run_ui(
         });
         let state_ptr = Box::into_raw(state);
 
+        let win_w = 360;
+        let win_h = 440;
+
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PREFS_CLASS,
-            w!("vis_taskbar - Preferences"),
+            w!("vis_taskbar"),
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            320,
-            380,
+            win_w,
+            win_h,
             HWND::default(),
             HMENU::default(),
             hinstance,
             Some(state_ptr as *const _),
         )
         .unwrap();
+
+        // Enable dark title bar (Windows 10 20H1+ / Windows 11)
+        enable_dark_mode(hwnd);
 
         // Create tray icon
         if let Ok(tray) = tray::TrayIcon::new(hwnd) {
@@ -106,13 +156,20 @@ pub fn run_ui(
 
         // Cleanup
         let _ = Box::from_raw(state_ptr);
+        DeleteObject(BG_BRUSH);
+        DeleteObject(SURFACE_BRUSH);
+        DeleteObject(OVERLAY_BRUSH);
+        DeleteObject(UI_FONT);
+        DeleteObject(SECTION_FONT);
     }
 }
 
 unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings) {
-    let font = GetStockObject(DEFAULT_GUI_FONT);
+    let pad = 20i32;       // outer padding
+    let inner_pad = 15i32; // padding inside sections
+    let client_w = 320i32; // usable width inside padding
 
-    let create = |class: PCWSTR, text: &str, style: u32, x: i32, y: i32, w: i32, h: i32, id: u32| {
+    let create = |class: PCWSTR, text: &str, style: u32, x: i32, y: i32, w: i32, h: i32, id: u32| -> HWND {
         let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
         let child = CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -125,13 +182,29 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
             hinstance,
             None,
         ).unwrap();
-        SendMessageW(child, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+        SendMessageW(child, WM_SETFONT, WPARAM(UI_FONT.0 as usize), LPARAM(1));
         child
     };
 
-    // Checkboxes
-    create(w!("BUTTON"), "Full Taskbar", BS_AUTOCHECKBOX as u32, 20, 15, 140, 20, IDC_FULL_TASKBAR);
-    create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, 170, 15, 120, 20, IDC_BARS);
+    let create_section = |text: &str, x: i32, y: i32, w: i32, id: u32| {
+        let ctrl = create(w!("STATIC"), text, 0, x, y, w, 18, id);
+        SendMessageW(ctrl, WM_SETFONT, WPARAM(SECTION_FONT.0 as usize), LPARAM(1));
+    };
+
+    // Owner-draw push button
+    let create_btn = |text: &str, x: i32, y: i32, w: i32, h: i32, id: u32| {
+        create(w!("BUTTON"), text, BS_OWNERDRAW as u32, x, y, w, h, id);
+    };
+
+    let mut y = pad;
+
+    // ── Display section ──
+    create_section("DISPLAY", pad, y, client_w, IDC_SECTION_DISPLAY);
+    y += 26;
+
+    create(w!("BUTTON"), "Full Taskbar", BS_AUTOCHECKBOX as u32, pad + inner_pad, y, 130, 22, IDC_FULL_TASKBAR);
+    create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, pad + inner_pad + 150, y, 120, 22, IDC_BARS);
+    y += 32;
 
     if settings.full_taskbar {
         SendDlgItemMessageW(hwnd, IDC_FULL_TASKBAR as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
@@ -140,30 +213,49 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
         SendDlgItemMessageW(hwnd, IDC_BARS as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
     }
 
-    // Sleep time
-    create(w!("STATIC"), "Sleep (ms):", 0, 20, 50, 80, 20, IDC_SLEEP_LABEL);
-    create(w!("EDIT"), &settings.sleep_time_ms.to_string(), WS_BORDER.0 | ES_NUMBER as u32, 110, 48, 60, 22, IDC_SLEEP_EDIT);
+    // ── Timing section ──
+    create_section("TIMING", pad, y, client_w, IDC_SECTION_TIMING);
+    y += 26;
 
-    // Step multiplier
-    create(w!("STATIC"), "Step:", 0, 20, 80, 80, 20, IDC_STEP_LABEL);
-    create(w!("EDIT"), &settings.step_multiplier.to_string(), WS_BORDER.0 | ES_NUMBER as u32, 110, 78, 60, 22, IDC_STEP_EDIT);
+    create(w!("STATIC"), "Refresh interval (ms)", 0, pad + inner_pad, y + 2, 150, 20, IDC_SLEEP_LABEL);
+    create(w!("EDIT"), &settings.sleep_time_ms.to_string(), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 200, y, 60, 24, IDC_SLEEP_EDIT);
+    y += 32;
 
-    // Color buttons + swatches
-    let color_y = 120;
-    create(w!("STATIC"), "", 0, 20, color_y, 30, 20, IDC_TOP_COLOR_SWATCH);
-    create(w!("BUTTON"), "Top Color...", 0, 60, color_y, 110, 24, IDC_TOP_COLOR_BTN);
+    create(w!("STATIC"), "Bar width multiplier", 0, pad + inner_pad, y + 2, 150, 20, IDC_STEP_LABEL);
+    create(w!("EDIT"), &settings.step_multiplier.to_string(), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 200, y, 60, 24, IDC_STEP_EDIT);
+    y += 38;
 
-    create(w!("STATIC"), "", 0, 20, color_y + 30, 30, 20, IDC_BOTTOM_COLOR_SWATCH);
-    create(w!("BUTTON"), "Bottom Color...", 0, 60, color_y + 30, 110, 24, IDC_BOTTOM_COLOR_BTN);
+    // ── Colors section ──
+    create_section("COLORS", pad, y, client_w, IDC_SECTION_COLORS);
+    y += 26;
 
-    create(w!("STATIC"), "", 0, 20, color_y + 60, 30, 20, IDC_PEAK_COLOR_SWATCH);
-    create(w!("BUTTON"), "Peak Color...", 0, 60, color_y + 60, 110, 24, IDC_PEAK_COLOR_BTN);
+    // Top color row
+    create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_TOP_COLOR_SWATCH);
+    create(w!("STATIC"), "Top gradient", 0, pad + inner_pad + 32, y + 2, 100, 20, IDC_TOP_COLOR_LABEL);
+    create_btn("Change...", pad + inner_pad + 200, y, 75, 24, IDC_TOP_COLOR_BTN);
+    y += 30;
 
-    // Buttons
-    let btn_y = 280;
-    create(w!("BUTTON"), "Apply", 0, 20, btn_y, 80, 28, IDC_APPLY);
-    create(w!("BUTTON"), "Reset", 0, 110, btn_y, 80, 28, IDC_RESET);
-    create(w!("BUTTON"), "Close", 0, 200, btn_y, 80, 28, IDC_CLOSE);
+    // Bottom color row
+    create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_BOTTOM_COLOR_SWATCH);
+    create(w!("STATIC"), "Bottom gradient", 0, pad + inner_pad + 32, y + 2, 110, 20, IDC_BOTTOM_COLOR_LABEL);
+    create_btn("Change...", pad + inner_pad + 200, y, 75, 24, IDC_BOTTOM_COLOR_BTN);
+    y += 30;
+
+    // Peak color row
+    create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_PEAK_COLOR_SWATCH);
+    create(w!("STATIC"), "Peak line", 0, pad + inner_pad + 32, y + 2, 100, 20, IDC_PEAK_COLOR_LABEL);
+    create_btn("Change...", pad + inner_pad + 200, y, 75, 24, IDC_PEAK_COLOR_BTN);
+    y += 44;
+
+    // ── Action buttons ──
+    let btn_w = 90;
+    let btn_h = 32;
+    let total_btns_w = btn_w * 3 + 10 * 2;
+    let btn_x = pad + (client_w - total_btns_w) / 2;
+
+    create_btn("Apply", btn_x, y, btn_w, btn_h, IDC_APPLY);
+    create_btn("Reset", btn_x + btn_w + 10, y, btn_w, btn_h, IDC_RESET);
+    create_btn("Close", btn_x + 2 * (btn_w + 10), y, btn_w, btn_h, IDC_CLOSE);
 }
 
 fn get_edit_u32(hwnd: HWND, id: u32) -> u32 {
@@ -176,10 +268,49 @@ fn get_edit_u32(hwnd: HWND, id: u32) -> u32 {
     }
 }
 
+/// Enable immersive dark mode title bar and set border/caption colors.
+unsafe fn enable_dark_mode(hwnd: HWND) {
+    // DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+    let dark: BOOL = TRUE;
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWINDOWATTRIBUTE(20),
+        &dark as *const BOOL as *const _,
+        std::mem::size_of::<BOOL>() as u32,
+    );
+
+    // DWMWA_BORDER_COLOR = 34 — set border to match our background
+    let border_color: u32 = BG_COLOR;
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWINDOWATTRIBUTE(34),
+        &border_color as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u32,
+    );
+
+    // DWMWA_CAPTION_COLOR = 35 — set caption/title bar color
+    let caption_color: u32 = BG_COLOR;
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWINDOWATTRIBUTE(35),
+        &caption_color as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u32,
+    );
+
+    // DWMWA_TEXT_COLOR = 36 — set title bar text color
+    let text_color: u32 = TEXT_COLOR;
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWINDOWATTRIBUTE(36),
+        &text_color as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u32,
+    );
+}
+
 fn is_checked(hwnd: HWND, id: u32) -> bool {
     unsafe {
         let result = SendDlgItemMessageW(hwnd, id as i32, BM_GETCHECK, WPARAM(0), LPARAM(0));
-        result.0 == 1 // BST_CHECKED
+        result.0 == 1
     }
 }
 
@@ -195,6 +326,14 @@ unsafe extern "system" fn prefs_wnd_proc(
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, cs.lpCreateParams as isize);
             LRESULT(0)
         }
+        WM_ERASEBKGND => {
+            // Dark background
+            let hdc = HDC(wparam.0 as *mut _);
+            let mut rc = RECT::default();
+            GetClientRect(hwnd, &mut rc);
+            FillRect(hdc, &rc, BG_BRUSH);
+            LRESULT(1)
+        }
         WM_CTLCOLORSTATIC => {
             let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
             if state_ptr == 0 {
@@ -205,6 +344,7 @@ unsafe extern "system" fn prefs_wnd_proc(
             let id = GetDlgCtrlID(ctrl_hwnd) as u32;
             let hdc = HDC(wparam.0 as *mut _);
 
+            // Color swatches
             let color = match id {
                 IDC_TOP_COLOR_SWATCH => Some(state.local.color_top),
                 IDC_BOTTOM_COLOR_SWATCH => Some(state.local.color_bottom),
@@ -219,7 +359,93 @@ unsafe extern "system" fn prefs_wnd_proc(
                 return LRESULT(brush.0 as isize);
             }
 
-            DefWindowProcW(hwnd, msg, wparam, lparam)
+            // Section headers get accent color
+            match id {
+                IDC_SECTION_DISPLAY | IDC_SECTION_TIMING | IDC_SECTION_COLORS => {
+                    SetTextColor(hdc, COLORREF(ACCENT_COLOR));
+                    SetBkColor(hdc, COLORREF(BG_COLOR));
+                    return LRESULT(BG_BRUSH.0 as isize);
+                }
+                _ => {}
+            }
+
+            // All other static text: light text on dark bg
+            SetTextColor(hdc, COLORREF(TEXT_COLOR));
+            SetBkColor(hdc, COLORREF(BG_COLOR));
+            LRESULT(BG_BRUSH.0 as isize)
+        }
+        WM_CTLCOLORBTN => {
+            let hdc = HDC(wparam.0 as *mut _);
+            SetTextColor(hdc, COLORREF(TEXT_COLOR));
+            SetBkColor(hdc, COLORREF(SURFACE_COLOR));
+            LRESULT(SURFACE_BRUSH.0 as isize)
+        }
+        WM_CTLCOLOREDIT => {
+            let hdc = HDC(wparam.0 as *mut _);
+            SetTextColor(hdc, COLORREF(TEXT_COLOR));
+            SetBkColor(hdc, COLORREF(OVERLAY_COLOR));
+            LRESULT(OVERLAY_BRUSH.0 as isize)
+        }
+        WM_DRAWITEM => {
+            let dis = &*(lparam.0 as *const DRAWITEMSTRUCT);
+            let id = dis.CtlID;
+            let hdc = dis.hDC;
+            let rc = dis.rcItem;
+            let is_pressed = (dis.itemState.0 & 0x0001) != 0; // ODS_SELECTED
+            let is_focus = (dis.itemState.0 & 0x0010) != 0;   // ODS_FOCUS
+
+            // Choose colors: "Apply" gets accent, others get surface
+            let (bg, text, border) = if id == IDC_APPLY {
+                if is_pressed {
+                    (ACCENT_COLOR, BG_COLOR, ACCENT_COLOR)
+                } else {
+                    (ACCENT_COLOR, BG_COLOR, ACCENT_COLOR)
+                }
+            } else if is_pressed {
+                (OVERLAY_COLOR, TEXT_COLOR, BORDER_COLOR)
+            } else {
+                (SURFACE_COLOR, TEXT_COLOR, BORDER_COLOR)
+            };
+
+            // Border
+            let border_brush = CreateSolidBrush(COLORREF(border));
+            FrameRect(hdc, &rc, border_brush);
+            DeleteObject(border_brush);
+
+            // Fill (inset by 1 for border)
+            let inner = RECT {
+                left: rc.left + 1,
+                top: rc.top + 1,
+                right: rc.right - 1,
+                bottom: rc.bottom - 1,
+            };
+            let fill_brush = CreateSolidBrush(COLORREF(bg));
+            FillRect(hdc, &inner, fill_brush);
+            DeleteObject(fill_brush);
+
+            // Text
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLORREF(text));
+            let old_font = SelectObject(hdc, HGDIOBJ(UI_FONT.0));
+            let mut text_rc = rc;
+            let mut buf = [0u16; 64];
+            let len = GetWindowTextW(dis.hwndItem, &mut buf);
+            DrawTextW(hdc, &mut buf[..len as usize], &mut text_rc,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(hdc, old_font);
+
+            // Focus dotted rect
+            if is_focus {
+                let focus_rc = RECT {
+                    left: rc.left + 3,
+                    top: rc.top + 3,
+                    right: rc.right - 3,
+                    bottom: rc.bottom - 3,
+                };
+                DrawFocusRect(hdc, &focus_rc);
+            }
+
+            LRESULT(1)
         }
         WM_COMMAND => {
             let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
