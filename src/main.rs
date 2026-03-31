@@ -23,8 +23,11 @@ fn main() {
     let is_running = Arc::new(AtomicBool::new(false));
     let stop = Arc::new(AtomicBool::new(false));
 
-    // Channel for spectrum frames (bounded, drop old frames if renderer is slow)
     let (frame_tx, frame_rx) = crossbeam_channel::bounded(2);
+    let shared_falloff = Arc::new(Mutex::new(renderer::SharedFalloff {
+        falloff: vec![0i16; 256],
+        peaks: vec![0i16; 256],
+    }));
 
     // Start audio + render
     let start = {
@@ -33,6 +36,7 @@ fn main() {
         let stop = stop.clone();
         let frame_tx = frame_tx.clone();
         let frame_rx = frame_rx.clone();
+        let shared_falloff = shared_falloff.clone();
 
         move || {
             if is_running.load(Ordering::Relaxed) {
@@ -41,7 +45,7 @@ fn main() {
             stop.store(false, Ordering::Relaxed);
             is_running.store(true, Ordering::Relaxed);
 
-            // Audio thread
+            // Audio thread — sends directly to renderer
             let stop_a = stop.clone();
             let tx = frame_tx.clone();
             std::thread::Builder::new()
@@ -57,12 +61,13 @@ fn main() {
             let is_running_r = is_running.clone();
             let rx = frame_rx.clone();
 
+            let sf = shared_falloff.clone();
             let full_taskbar = settings.lock().unwrap().full_taskbar;
             std::thread::Builder::new()
                 .name("renderer".into())
                 .spawn(move || {
                     if let Some(tb) = taskbar::TaskbarInfo::locate() {
-                        renderer::render_loop(rx, settings_r, stop_r, &tb, full_taskbar);
+                        renderer::render_loop(rx, settings_r, stop_r, &tb, full_taskbar, sf);
                     } else {
                         log::error!("Failed to locate taskbar");
                     }
@@ -90,6 +95,7 @@ fn main() {
         is_running.clone(),
         Box::new(start),
         Box::new(stop_fn),
+        shared_falloff,
     );
 
     // Cleanup
