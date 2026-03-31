@@ -3,6 +3,7 @@
 A real-time audio spectrum visualizer that renders directly on the Windows taskbar. Captures system audio via WASAPI loopback and draws mirrored frequency bars with gradient coloring and peak indicators using OpenGL.
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg?logo=rust)
 
 ## Features
 
