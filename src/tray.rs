@@ -73,7 +73,7 @@ impl TrayIcon {
             let _ = GetCursorPos(&mut pt);
 
             let hmenu = CreatePopupMenu().unwrap();
-            let _ = AppendMenuW(hmenu, MENU_ITEM_FLAGS(0), CMD_SHOW_CONFIG as usize, w!("&Show Configuration"));
+            let _ = AppendMenuW(hmenu, MENU_ITEM_FLAGS(0), CMD_SHOW_CONFIG as usize, w!("&Settings"));
             if is_running {
                 let _ = AppendMenuW(hmenu, MENU_ITEM_FLAGS(0), CMD_STOP as usize, w!("S&top"));
             } else {
