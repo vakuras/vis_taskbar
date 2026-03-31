@@ -157,23 +157,17 @@ impl Renderer {
         inner: &RECT,
         settings: &Settings,
     ) {
-        // Update falloff
-        for i in 0..self.data_size {
-            let value = new_values.map_or(0, |v| v.get(i).copied().unwrap_or(0)) as i16;
+        self.update_falloff(new_values);
+        self.render_gl(outer, inner, settings);
+    }
 
-            if new_values.is_some() && self.vis_falloff[i] < value {
-                self.vis_falloff[i] = value;
-            } else {
-                self.vis_falloff[i] = (self.vis_falloff[i] - 7).max(0);
-            }
-
-            if new_values.is_some() && self.vis_peak_falloff[i] < value {
-                self.vis_peak_falloff[i] = value;
-            } else {
-                self.vis_peak_falloff[i] = (self.vis_peak_falloff[i] - 2).max(0);
-            }
-        }
-
+    /// GL rendering (assumes GL context is current).
+    fn render_gl(
+        &self,
+        outer: &RECT,
+        inner: &RECT,
+        settings: &Settings,
+    ) {
         let height = inner.bottom - inner.top;
         let width = inner.right - inner.left;
         let outer_w = outer.right - outer.left;
@@ -353,6 +347,109 @@ impl Renderer {
         self.started
     }
 
+    /// Initialize an OpenGL context on an existing child HWND (e.g. a static control).
+    pub fn init_on_child(&mut self, hwnd: HWND) -> Result<()> {
+        self.hwnd = hwnd;
+        self.init_gl()?;
+        self.started = true;
+        Ok(())
+    }
+
+    /// Render preview using shared falloff data from the taskbar renderer.
+    /// This ensures the preview looks identical to the taskbar.
+    pub fn render_preview_from_shared(&mut self, settings: &Settings, shared: &SharedFalloff) {
+        unsafe {
+            wglMakeCurrent(self.hdc, self.hglrc);
+
+            let mut rc = RECT::default();
+            GetClientRect(self.hwnd, &mut rc);
+            let preview_w = rc.right - rc.left;
+            let preview_h = rc.bottom - rc.top;
+            if preview_w <= 0 || preview_h <= 0 { return; }
+
+            glViewport(0, 0, preview_w, preview_h);
+
+            // Copy shared falloff
+            let len = self.data_size.min(shared.falloff.len());
+            self.vis_falloff[..len].copy_from_slice(&shared.falloff[..len]);
+            let len = self.data_size.min(shared.peaks.len());
+            self.vis_peak_falloff[..len].copy_from_slice(&shared.peaks[..len]);
+
+            // Fake the width to match taskbar (same bar pixel width).
+            // Use actual preview height so bars fill vertically.
+            let fake_w = 1920;
+            let offset_x = (fake_w - preview_w) / 2;
+
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            glOrtho(
+                offset_x as f64,
+                (offset_x + preview_w) as f64,
+                preview_h as f64,  // actual height — bars fill the preview
+                0.0,
+                0.0,
+                1.0,
+            );
+            glDisable(GL_DEPTH_TEST);
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+            glTranslatef(0.375, 0.375, 0.0);
+            // Match dialog background #1e2028
+            glClearColor(0.118, 0.125, 0.157, 1.0);
+            glClear(GL_COLOR_BUFFER_BIT);
+            let half_data = self.data_size / 2;
+            let height = preview_h; // use real height for bar scaling
+            let step = ((fake_w as f64 / self.data_size as f64).ceil() as i32)
+                * settings.step_multiplier as i32;
+            let center = fake_w / 2;
+
+            let mut target_left = ((center / step.max(1)) - 1) as usize;
+            target_left = target_left.min(half_data - 1);
+            if settings.bars { target_left += 1; }
+
+            self.draw_bars(
+                &settings.color_top, &settings.color_bottom,
+                center, step, height, target_left, 0, true, settings.bars,
+            );
+            self.draw_peaks(
+                &settings.color_peaks, center, step, height, target_left, 0, true,
+            );
+
+            let mut target_right = ((center / step.max(1)) + 1) as usize;
+            target_right = target_right.min(half_data - 1);
+            if settings.bars { target_right += 1; }
+
+            self.draw_bars(
+                &settings.color_top, &settings.color_bottom,
+                center, step, height, target_right, half_data, false, settings.bars,
+            );
+            self.draw_peaks(
+                &settings.color_peaks, center, step, height, target_right, half_data, false,
+            );
+
+            let _ = SwapBuffers(self.hdc);
+        }
+    }
+
+    /// Update falloff from new values without rendering.
+    pub fn update_falloff(&mut self, new_values: Option<&[u8]>) {
+        for i in 0..self.data_size {
+            let value = new_values.map_or(0, |v| v.get(i).copied().unwrap_or(0)) as i16;
+
+            if new_values.is_some() && self.vis_falloff[i] < value {
+                self.vis_falloff[i] = value;
+            } else {
+                self.vis_falloff[i] = (self.vis_falloff[i] - 7).max(0);
+            }
+
+            if new_values.is_some() && self.vis_peak_falloff[i] < value {
+                self.vis_peak_falloff[i] = value;
+            } else {
+                self.vis_peak_falloff[i] = (self.vis_peak_falloff[i] - 2).max(0);
+            }
+        }
+    }
+
     pub fn process_messages(&self) -> bool {
         unsafe {
             let mut msg = MSG::default();
@@ -374,16 +471,20 @@ impl Drop for Renderer {
     }
 }
 
+/// Shared falloff data — written by taskbar renderer, read by preview.
+pub struct SharedFalloff {
+    pub falloff: Vec<i16>,
+    pub peaks: Vec<i16>,
+}
+
 /// Run the render loop on the current thread.
-/// `frame_rx` receives new spectrum frames from the audio thread.
-/// `settings` is shared mutable config.
-/// `stop` signals when to quit.
 pub fn render_loop(
     frame_rx: crossbeam_channel::Receiver<SpectrumFrame>,
     settings: Arc<Mutex<Settings>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     taskbar_info: &crate::taskbar::TaskbarInfo,
     full_taskbar_init: bool,
+    shared_falloff: Arc<Mutex<SharedFalloff>>,
 ) {
     let (outer, _inner) = match taskbar_info.get_rects(full_taskbar_init) {
         Some(r) => r,
@@ -418,6 +519,14 @@ pub fn render_loop(
         if let Some((outer, inner)) = taskbar_info.get_rects(settings.full_taskbar) {
             renderer.update_position(&outer);
             renderer.render(new_values, &outer, &inner, &settings);
+
+            // Copy falloff to shared for preview
+            if let Ok(mut sf) = shared_falloff.lock() {
+                sf.falloff.clear();
+                sf.falloff.extend_from_slice(&renderer.vis_falloff);
+                sf.peaks.clear();
+                sf.peaks.extend_from_slice(&renderer.vis_peak_falloff);
+            }
         }
 
         std::thread::sleep(std::time::Duration::from_millis(settings.sleep_time_ms as u64));

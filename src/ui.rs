@@ -27,6 +27,7 @@ const IDC_PEAK_COLOR_SWATCH: u32 = 1022;
 const IDC_APPLY: u32 = 1030;
 const IDC_RESET: u32 = 1031;
 const IDC_CLOSE: u32 = 1032;
+const IDC_RESTART: u32 = 1033;
 // Section labels (static text, no interaction)
 const IDC_SECTION_DISPLAY: u32 = 1040;
 const IDC_SECTION_TIMING: u32 = 1041;
@@ -34,6 +35,11 @@ const IDC_SECTION_COLORS: u32 = 1042;
 const IDC_TOP_COLOR_LABEL: u32 = 1043;
 const IDC_BOTTOM_COLOR_LABEL: u32 = 1044;
 const IDC_PEAK_COLOR_LABEL: u32 = 1045;
+const IDC_PREVIEW: u32 = 1050;
+const IDC_SECTION_PREVIEW: u32 = 1051;
+
+const PREVIEW_TIMER_ID: usize = 100;
+const PREVIEW_HEIGHT: i32 = 60;
 
 const PREFS_CLASS: PCWSTR = w!("VIS_PREFS_CLASS");
 
@@ -60,6 +66,8 @@ struct UiState {
     is_running: Arc<std::sync::atomic::AtomicBool>,
     start_fn: Box<dyn Fn()>,
     stop_fn: Box<dyn Fn()>,
+    shared_falloff: Arc<Mutex<crate::renderer::SharedFalloff>>,
+    preview_renderer: Option<crate::renderer::Renderer>,
 }
 
 /// Create and run the preferences window + message loop.
@@ -68,6 +76,7 @@ pub fn run_ui(
     is_running: Arc<std::sync::atomic::AtomicBool>,
     start_fn: Box<dyn Fn()>,
     stop_fn: Box<dyn Fn()>,
+    shared_falloff: Arc<Mutex<crate::renderer::SharedFalloff>>,
 ) {
     unsafe {
         let hinstance: HINSTANCE = std::mem::transmute(GetModuleHandleW(None).unwrap());
@@ -112,16 +121,18 @@ pub fn run_ui(
             is_running,
             start_fn,
             stop_fn,
+            shared_falloff,
+            preview_renderer: None,
         });
         let state_ptr = Box::into_raw(state);
 
-        let win_w = 360;
-        let win_h = 440;
+        let win_w = 480;
+        let win_h = 465;
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PREFS_CLASS,
-            w!("vis_taskbar"),
+            w!("vis_taskbar - Settings"),
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -143,6 +154,9 @@ pub fn run_ui(
         }
 
         create_controls(hwnd, hinstance, &(*state_ptr).local);
+
+        // Start a timer for preview updates (match taskbar refresh)
+        SetTimer(hwnd, PREVIEW_TIMER_ID, 15, None);
 
         // Start hidden
         ShowWindow(hwnd, SW_HIDE);
@@ -167,7 +181,7 @@ pub fn run_ui(
 unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings) {
     let pad = 20i32;       // outer padding
     let inner_pad = 15i32; // padding inside sections
-    let client_w = 320i32; // usable width inside padding
+    let client_w = 420i32; // usable width inside padding
 
     let create = |class: PCWSTR, text: &str, style: u32, x: i32, y: i32, w: i32, h: i32, id: u32| -> HWND {
         let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
@@ -197,13 +211,16 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     };
 
     let mut y = pad;
+    let right_edge = pad + client_w;  // right side of usable area
+    let edit_w = 70;
+    let btn_change_w = 85;
 
     // ── Display section ──
     create_section("DISPLAY", pad, y, client_w, IDC_SECTION_DISPLAY);
     y += 26;
 
-    create(w!("BUTTON"), "Full Taskbar", BS_AUTOCHECKBOX as u32, pad + inner_pad, y, 130, 22, IDC_FULL_TASKBAR);
-    create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, pad + inner_pad + 150, y, 120, 22, IDC_BARS);
+    create(w!("BUTTON"), "Full Taskbar", BS_AUTOCHECKBOX as u32, pad + inner_pad, y, 140, 22, IDC_FULL_TASKBAR);
+    create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, pad + inner_pad + 180, y, 120, 22, IDC_BARS);
     y += 32;
 
     if settings.full_taskbar {
@@ -217,12 +234,12 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     create_section("TIMING", pad, y, client_w, IDC_SECTION_TIMING);
     y += 26;
 
-    create(w!("STATIC"), "Refresh interval (ms)", 0, pad + inner_pad, y + 2, 150, 20, IDC_SLEEP_LABEL);
-    create(w!("EDIT"), &settings.sleep_time_ms.to_string(), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 200, y, 60, 24, IDC_SLEEP_EDIT);
+    create(w!("STATIC"), "Refresh interval (ms)", 0, pad + inner_pad, y + 2, 180, 20, IDC_SLEEP_LABEL);
+    create(w!("EDIT"), &settings.sleep_time_ms.to_string(), WS_BORDER.0 | ES_NUMBER as u32, right_edge - edit_w, y, edit_w, 24, IDC_SLEEP_EDIT);
     y += 32;
 
-    create(w!("STATIC"), "Bar width multiplier", 0, pad + inner_pad, y + 2, 150, 20, IDC_STEP_LABEL);
-    create(w!("EDIT"), &settings.step_multiplier.to_string(), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 200, y, 60, 24, IDC_STEP_EDIT);
+    create(w!("STATIC"), "Bar width multiplier", 0, pad + inner_pad, y + 2, 180, 20, IDC_STEP_LABEL);
+    create(w!("EDIT"), &settings.step_multiplier.to_string(), WS_BORDER.0 | ES_NUMBER as u32, right_edge - edit_w, y, edit_w, 24, IDC_STEP_EDIT);
     y += 38;
 
     // ── Colors section ──
@@ -231,31 +248,37 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
 
     // Top color row
     create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_TOP_COLOR_SWATCH);
-    create(w!("STATIC"), "Top gradient", 0, pad + inner_pad + 32, y + 2, 100, 20, IDC_TOP_COLOR_LABEL);
-    create_btn("Change...", pad + inner_pad + 200, y, 75, 24, IDC_TOP_COLOR_BTN);
+    create(w!("STATIC"), "Top gradient", 0, pad + inner_pad + 32, y + 2, 120, 20, IDC_TOP_COLOR_LABEL);
+    create_btn("Change...", right_edge - btn_change_w, y, btn_change_w, 24, IDC_TOP_COLOR_BTN);
     y += 30;
 
     // Bottom color row
     create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_BOTTOM_COLOR_SWATCH);
-    create(w!("STATIC"), "Bottom gradient", 0, pad + inner_pad + 32, y + 2, 110, 20, IDC_BOTTOM_COLOR_LABEL);
-    create_btn("Change...", pad + inner_pad + 200, y, 75, 24, IDC_BOTTOM_COLOR_BTN);
+    create(w!("STATIC"), "Bottom gradient", 0, pad + inner_pad + 32, y + 2, 120, 20, IDC_BOTTOM_COLOR_LABEL);
+    create_btn("Change...", right_edge - btn_change_w, y, btn_change_w, 24, IDC_BOTTOM_COLOR_BTN);
     y += 30;
 
     // Peak color row
     create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_PEAK_COLOR_SWATCH);
-    create(w!("STATIC"), "Peak line", 0, pad + inner_pad + 32, y + 2, 100, 20, IDC_PEAK_COLOR_LABEL);
-    create_btn("Change...", pad + inner_pad + 200, y, 75, 24, IDC_PEAK_COLOR_BTN);
+    create(w!("STATIC"), "Peak line", 0, pad + inner_pad + 32, y + 2, 120, 20, IDC_PEAK_COLOR_LABEL);
+    create_btn("Change...", right_edge - btn_change_w, y, btn_change_w, 24, IDC_PEAK_COLOR_BTN);
     y += 44;
 
-    // ── Action buttons ──
-    let btn_w = 90;
+    // ── Action buttons — right-aligned ──
+    let btn_w = 85;
     let btn_h = 32;
-    let total_btns_w = btn_w * 3 + 10 * 2;
-    let btn_x = pad + (client_w - total_btns_w) / 2;
+    let btn_gap = 8;
+    let btns_total_w = btn_w * 4 + btn_gap * 3;
+    let btn_x = pad + client_w - btns_total_w;
 
     create_btn("Apply", btn_x, y, btn_w, btn_h, IDC_APPLY);
-    create_btn("Reset", btn_x + btn_w + 10, y, btn_w, btn_h, IDC_RESET);
-    create_btn("Close", btn_x + 2 * (btn_w + 10), y, btn_w, btn_h, IDC_CLOSE);
+    create_btn("Restart", btn_x + btn_w + btn_gap, y, btn_w, btn_h, IDC_RESTART);
+    create_btn("Reset", btn_x + (btn_w + btn_gap) * 2, y, btn_w, btn_h, IDC_RESET);
+    create_btn("Close", btn_x + (btn_w + btn_gap) * 3, y, btn_w, btn_h, IDC_CLOSE);
+    y += btn_h + 12;
+
+    // Preview area — plain static, GL renders directly into it
+    create(w!("STATIC"), "", 0, pad, y, client_w, PREVIEW_HEIGHT, IDC_PREVIEW);
 }
 
 fn get_edit_u32(hwnd: HWND, id: u32) -> u32 {
@@ -267,7 +290,32 @@ fn get_edit_u32(hwnd: HWND, id: u32) -> u32 {
         s.parse().unwrap_or(1)
     }
 }
+
 
+fn set_edit_u32(hwnd: HWND, id: u32, value: u32) {
+    unsafe {
+        let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
+        let text = value.to_string();
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        SetWindowTextW(ctrl, PCWSTR(wide.as_ptr()));
+    }
+}
+
+fn set_checked(hwnd: HWND, id: u32, checked: bool) {
+    unsafe {
+        SendDlgItemMessageW(
+            hwnd, id as i32, BM_SETCHECK,
+            WPARAM(if checked { 1 } else { 0 }), LPARAM(0),
+        );
+    }
+}
+
+fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
+    set_checked(hwnd, IDC_FULL_TASKBAR, settings.full_taskbar);
+    set_checked(hwnd, IDC_BARS, settings.bars);
+    set_edit_u32(hwnd, IDC_SLEEP_EDIT, settings.sleep_time_ms);
+    set_edit_u32(hwnd, IDC_STEP_EDIT, settings.step_multiplier);
+}
 /// Enable immersive dark mode title bar and set border/caption colors.
 unsafe fn enable_dark_mode(hwnd: HWND) {
     // DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -391,13 +439,14 @@ unsafe extern "system" fn prefs_wnd_proc(
             let id = dis.CtlID;
             let hdc = dis.hDC;
             let rc = dis.rcItem;
+
             let is_pressed = (dis.itemState.0 & 0x0001) != 0; // ODS_SELECTED
             let is_focus = (dis.itemState.0 & 0x0010) != 0;   // ODS_FOCUS
 
             // Choose colors: "Apply" gets accent, others get surface
             let (bg, text, border) = if id == IDC_APPLY {
                 if is_pressed {
-                    (ACCENT_COLOR, BG_COLOR, ACCENT_COLOR)
+                    (ACCENT_HOVER, BG_COLOR, ACCENT_COLOR)
                 } else {
                     (ACCENT_COLOR, BG_COLOR, ACCENT_COLOR)
                 }
@@ -447,6 +496,33 @@ unsafe extern "system" fn prefs_wnd_proc(
 
             LRESULT(1)
         }
+        WM_TIMER => {
+            if wparam.0 == PREVIEW_TIMER_ID {
+                let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+                if state_ptr != 0 {
+                    let state = &mut *(state_ptr as *mut UiState);
+
+                    // Init GL preview renderer on first tick
+                    if state.preview_renderer.is_none() {
+                        let preview_hwnd = GetDlgItem(hwnd, IDC_PREVIEW as i32).unwrap_or_default();
+                        if !preview_hwnd.is_invalid() {
+                            let mut r = crate::renderer::Renderer::new(256);
+                            if r.init_on_child(preview_hwnd).is_ok() {
+                                state.preview_renderer = Some(r);
+                            }
+                        }
+                    }
+
+                    // Read shared falloff from taskbar renderer and draw
+                    if let Some(ref mut renderer) = state.preview_renderer {
+                        if let Ok(sf) = state.shared_falloff.lock() {
+                            renderer.render_preview_from_shared(&state.local, &sf);
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        }
         WM_COMMAND => {
             let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
             if state_ptr == 0 {
@@ -454,12 +530,15 @@ unsafe extern "system" fn prefs_wnd_proc(
             }
             let state = &mut *(state_ptr as *mut UiState);
             let cmd = (wparam.0 & 0xFFFF) as u32;
+            let notify = ((wparam.0 >> 16) & 0xFFFF) as u32;
+            // BN_CLICKED = 0
+            let is_click = notify == 0;
 
             match cmd {
-                IDC_FULL_TASKBAR => {
+                IDC_FULL_TASKBAR if is_click => {
                     state.local.full_taskbar = is_checked(hwnd, IDC_FULL_TASKBAR);
                 }
-                IDC_BARS => {
+                IDC_BARS if is_click => {
                     state.local.bars = is_checked(hwnd, IDC_BARS);
                 }
                 IDC_TOP_COLOR_BTN => {
@@ -477,6 +556,8 @@ unsafe extern "system" fn prefs_wnd_proc(
                 IDC_APPLY => {
                     state.local.sleep_time_ms = get_edit_u32(hwnd, IDC_SLEEP_EDIT);
                     state.local.step_multiplier = get_edit_u32(hwnd, IDC_STEP_EDIT);
+                    state.local.full_taskbar = is_checked(hwnd, IDC_FULL_TASKBAR);
+                    state.local.bars = is_checked(hwnd, IDC_BARS);
                     *state.settings.lock().unwrap() = state.local.clone();
                     if let Err(e) = state.local.save() {
                         log::error!("Failed to save config: {e}");
@@ -484,10 +565,16 @@ unsafe extern "system" fn prefs_wnd_proc(
                 }
                 IDC_RESET => {
                     state.local = state.settings.lock().unwrap().clone();
+                    sync_controls_from_settings(hwnd, &state.local);
                     let _ = InvalidateRect(hwnd, None, true);
                 }
                 IDC_CLOSE => {
                     ShowWindow(hwnd, SW_HIDE);
+                }
+                IDC_RESTART => {
+                    (state.stop_fn)();
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    (state.start_fn)();
                 }
                 cmd if cmd == tray::CMD_SHOW_CONFIG => {
                     ShowWindow(hwnd, SW_SHOW);
