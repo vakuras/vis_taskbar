@@ -219,13 +219,9 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     create_section("DISPLAY", pad, y, client_w, IDC_SECTION_DISPLAY);
     y += 26;
 
-    create(w!("BUTTON"), "Full Taskbar", BS_AUTOCHECKBOX as u32, pad + inner_pad, y, 140, 22, IDC_FULL_TASKBAR);
-    create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, pad + inner_pad + 180, y, 120, 22, IDC_BARS);
+    create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, pad + inner_pad, y, 120, 22, IDC_BARS);
     y += 32;
 
-    if settings.full_taskbar {
-        SendDlgItemMessageW(hwnd, IDC_FULL_TASKBAR as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
-    }
     if settings.bars {
         SendDlgItemMessageW(hwnd, IDC_BARS as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
     }
@@ -311,7 +307,6 @@ fn set_checked(hwnd: HWND, id: u32, checked: bool) {
 }
 
 fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
-    set_checked(hwnd, IDC_FULL_TASKBAR, settings.full_taskbar);
     set_checked(hwnd, IDC_BARS, settings.bars);
     set_edit_u32(hwnd, IDC_SLEEP_EDIT, settings.sleep_time_ms);
     set_edit_u32(hwnd, IDC_STEP_EDIT, settings.step_multiplier);
@@ -535,9 +530,6 @@ unsafe extern "system" fn prefs_wnd_proc(
             let is_click = notify == 0;
 
             match cmd {
-                IDC_FULL_TASKBAR if is_click => {
-                    state.local.full_taskbar = is_checked(hwnd, IDC_FULL_TASKBAR);
-                }
                 IDC_BARS if is_click => {
                     state.local.bars = is_checked(hwnd, IDC_BARS);
                 }
@@ -556,7 +548,6 @@ unsafe extern "system" fn prefs_wnd_proc(
                 IDC_APPLY => {
                     state.local.sleep_time_ms = get_edit_u32(hwnd, IDC_SLEEP_EDIT);
                     state.local.step_multiplier = get_edit_u32(hwnd, IDC_STEP_EDIT);
-                    state.local.full_taskbar = is_checked(hwnd, IDC_FULL_TASKBAR);
                     state.local.bars = is_checked(hwnd, IDC_BARS);
                     *state.settings.lock().unwrap() = state.local.clone();
                     if let Err(e) = state.local.save() {

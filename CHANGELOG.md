@@ -2,6 +2,20 @@
 
 All notable changes to vis_taskbar are documented in this file.
 
+## [0.5.1] - 2026-03-31
+
+### Added
+- Unit tests for config (TOML roundtrip, VisRgb colorref) and spectrum (silence, sine, stereo)
+- GitHub Actions CI workflow (build + test on push/PR)
+- NSIS installer with start menu and auto-start shortcuts
+
+### Changed
+- Fixed NSIS path in release CI workflow (add to PATH after install)
+- Release workflow now runs tests before building
+
+### Removed
+- "Full Taskbar" setting — always uses full taskbar width (legacy Win7 feature)
+
 ## [0.5.0] - 2026-03-31
 
 ### Changed

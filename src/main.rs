@@ -62,12 +62,11 @@ fn main() {
             let rx = frame_rx.clone();
 
             let sf = shared_falloff.clone();
-            let full_taskbar = settings.lock().unwrap().full_taskbar;
             std::thread::Builder::new()
                 .name("renderer".into())
                 .spawn(move || {
                     if let Some(tb) = taskbar::TaskbarInfo::locate() {
-                        renderer::render_loop(rx, settings_r, stop_r, &tb, full_taskbar, sf);
+                        renderer::render_loop(rx, settings_r, stop_r, &tb, sf);
                     } else {
                         log::error!("Failed to locate taskbar");
                     }

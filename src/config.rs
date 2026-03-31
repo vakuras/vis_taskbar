@@ -34,7 +34,6 @@ impl VisRgb {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    pub full_taskbar: bool,
     pub color_top: VisRgb,
     pub color_bottom: VisRgb,
     pub color_peaks: VisRgb,
@@ -46,7 +45,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            full_taskbar: true,
             color_top: VisRgb::new(1.0, 1.0, 0.0),    // yellow
             color_bottom: VisRgb::new(1.0, 0.0, 0.0),  // red
             color_peaks: VisRgb::new(1.0, 1.0, 1.0),   // white
@@ -83,5 +81,45 @@ impl Settings {
         std::fs::write(&path, contents)?;
         log::info!("Config saved to {}", path.display());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings_are_valid() {
+        let s = Settings::default();
+        assert_eq!(s.sleep_time_ms, 15);
+        assert_eq!(s.step_multiplier, 1);
+        assert!(!s.bars);
+        assert!(s.color_top.r > 0.0);
+    }
+
+    #[test]
+    fn settings_roundtrip_toml() {
+        let s = Settings::default();
+        let toml_str = toml::to_string_pretty(&s).unwrap();
+        let s2: Settings = toml::from_str(&toml_str).unwrap();
+        assert_eq!(s.sleep_time_ms, s2.sleep_time_ms);
+        assert_eq!(s.step_multiplier, s2.step_multiplier);
+        assert_eq!(s.bars, s2.bars);
+    }
+
+    #[test]
+    fn visrgb_colorref_roundtrip() {
+        let c = VisRgb::new(1.0, 0.5, 0.0);
+        let cr = c.to_colorref();
+        let c2 = VisRgb::from_colorref(cr);
+        assert!((c.r - c2.r).abs() < 0.01);
+        assert!((c.g - c2.g).abs() < 0.01);
+        assert!((c.b - c2.b).abs() < 0.01);
+    }
+
+    #[test]
+    fn visrgb_black_white() {
+        assert_eq!(VisRgb::new(0.0, 0.0, 0.0).to_colorref(), 0);
+        assert_eq!(VisRgb::new(1.0, 1.0, 1.0).to_colorref(), 0x00FFFFFF);
     }
 }
