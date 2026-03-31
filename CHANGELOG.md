@@ -2,16 +2,30 @@
 
 All notable changes to vis_taskbar are documented in this file.
 
+## [0.5.4] - 2026-03-31
+
+### Fixed
+- Hide console window — app now runs as a proper Windows GUI application
+
+## [0.5.3] - 2026-03-31
+
+### Changed
+- Switched installer from NSIS to Inno Setup (modern UI, DPI-aware, 64-bit native)
+- Release now produces both installer and portable ZIP
+
+## [0.5.2] - 2026-03-31
+
+### Added
+- TranslucentTB recommendation in README for transparent taskbar on Windows 11
+
 ## [0.5.1] - 2026-03-31
 
 ### Added
 - Unit tests for config (TOML roundtrip, VisRgb colorref) and spectrum (silence, sine, stereo)
 - GitHub Actions CI workflow (build + test on push/PR)
-- NSIS installer with start menu and auto-start shortcuts
 
 ### Changed
-- Fixed NSIS path in release CI workflow (add to PATH after install)
-- Release workflow now runs tests before building
+- Fixed NSIS path in release CI workflow
 
 ### Removed
 - "Full Taskbar" setting — always uses full taskbar width (legacy Win7 feature)
