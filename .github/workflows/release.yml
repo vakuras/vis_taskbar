@@ -17,15 +17,19 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Run tests
+        run: cargo test
+
       - name: Build release
         run: cargo build --release
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
       - name: Build installer
-        run: |
-          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+        run: makensis installer.nsi
 
       - name: Create ZIP
         run: |
