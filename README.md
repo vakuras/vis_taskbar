@@ -42,13 +42,18 @@ The binary is output to `target/release/vis_taskbar.exe`.
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Full Taskbar | Use entire taskbar width vs. task list area only | On |
 | Bar Mode | Discrete bars vs. smooth filled spectrum | Off |
 | Refresh interval | Render loop delay in milliseconds | 15ms |
 | Bar width multiplier | Scale factor for bar width | 1 |
 | Top gradient | Color at the top of bars | Yellow |
 | Bottom gradient | Color at the bottom of bars | Red |
 | Peak line | Color of the peak indicator line | White |
+
+### Transparent Taskbar
+
+For the best visual experience, install [TranslucentTB](https://github.com/TranslucentTB/TranslucentTB) to make your taskbar transparent. Set it to **Clear** mode so the spectrum bars render over your desktop wallpaper instead of an opaque taskbar background.
+
+TranslucentTB is available from the [Microsoft Store](https://apps.microsoft.com/detail/9pf4kz2vn4w9) or [GitHub](https://github.com/TranslucentTB/TranslucentTB/releases).
 
 ## Architecture
 
