@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+
+      - name: Create ZIP
+        run: |
+          Compress-Archive -Path target\release\vis_taskbar.exe, icon.ico, README.md, LICENSE, CHANGELOG.md -DestinationPath vis_taskbar-${{ github.ref_name }}-portable.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            vis_taskbar-*-setup.exe
+            vis_taskbar-*-portable.zip
+          generate_release_notes: true
