@@ -483,10 +483,9 @@ pub fn render_loop(
     settings: Arc<Mutex<Settings>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     taskbar_info: &crate::taskbar::TaskbarInfo,
-    full_taskbar_init: bool,
     shared_falloff: Arc<Mutex<SharedFalloff>>,
 ) {
-    let (outer, _inner) = match taskbar_info.get_rects(full_taskbar_init) {
+    let (outer, _inner) = match taskbar_info.get_rects() {
         Some(r) => r,
         None => {
             log::error!("Failed to get taskbar rects for renderer init");
@@ -516,7 +515,7 @@ pub fn render_loop(
         let new_values = frame.as_ref().map(|f| f.values.as_slice());
 
         // Update taskbar position
-        if let Some((outer, inner)) = taskbar_info.get_rects(settings.full_taskbar) {
+        if let Some((outer, inner)) = taskbar_info.get_rects() {
             renderer.update_position(&outer);
             renderer.render(new_values, &outer, &inner, &settings);
 
