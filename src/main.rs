@@ -1,4 +1,5 @@
 #![allow(unsafe_op_in_unsafe_fn, unused_must_use)]
+#![windows_subsystem = "windows"]
 
 mod audio;
 mod config;
