@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+
+# Rust build artifacts
+target/
