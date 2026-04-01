@@ -66,12 +66,10 @@ impl Spectrum {
         self.fft
             .process_with_scratch(&mut self.planner_buf, &mut self.scratch);
 
-        // Magnitude (normalized)
         let norm = 1.0 / self.fft_size as f32;
         for i in 0..self.bin_size {
             let c = self.planner_buf[i];
             let mag = (c.re * c.re + c.im * c.im).sqrt() * norm;
-            // Scale up for visibility (the C++ code mapped via * 256)
             self.magnitudes[i] = (mag * 4.0).min(1.0);
         }
 
