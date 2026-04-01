@@ -222,21 +222,38 @@ impl Renderer {
 
             let rt: &ID2D1RenderTarget = dc_target;
 
-            // Left spectrum
-            let mut target_left = ((center - (inner.left - outer.left) as f32) / step - 1.0).max(0.0) as usize;
-            target_left = target_left.min(half_data - 1);
-            if settings.bars { target_left += 1; }
+            if settings.invert_direction {
+                // Inverted: left channel from left edge rightward, right from right edge leftward
+                let left_edge = (inner.left - outer.left) as f32;
+                let right_edge = (inner.right - outer.left) as f32;
 
-            self.draw_bars_d2d(rt, settings, center, step, height, target_left, 0, true, settings.bars);
-            self.draw_peaks_d2d(rt, settings, center, step, height, target_left, 0, true);
+                let mut target_left = ((center - left_edge) / step + 1.0).max(0.0) as usize;
+                target_left = target_left.min(half_data - 1);
 
-            // Right spectrum
-            let mut target_right = (((inner.right - outer.left) as f32 - center) / step + 1.0).max(0.0) as usize;
-            target_right = target_right.min(half_data - 1);
-            if settings.bars { target_right += 1; }
+                self.draw_bars_d2d(rt, settings, left_edge, step, height, target_left, 0, false, settings.bars);
+                self.draw_peaks_d2d(rt, settings, left_edge, step, height, target_left, 0, false);
 
-            self.draw_bars_d2d(rt, settings, center, step, height, target_right, half_data, false, settings.bars);
-            self.draw_peaks_d2d(rt, settings, center, step, height, target_right, half_data, false);
+                let mut target_right = ((right_edge - center) / step + 1.0).max(0.0) as usize;
+                target_right = target_right.min(half_data - 1);
+
+                self.draw_bars_d2d(rt, settings, right_edge, step, height, target_right, half_data, true, settings.bars);
+                self.draw_peaks_d2d(rt, settings, right_edge, step, height, target_right, half_data, true);
+            } else {
+                // Normal: left channel from center leftward, right from center rightward
+                let mut target_left = ((center - (inner.left - outer.left) as f32) / step - 1.0).max(0.0) as usize;
+                target_left = target_left.min(half_data - 1);
+                if settings.bars { target_left += 1; }
+
+                self.draw_bars_d2d(rt, settings, center, step, height, target_left, 0, true, settings.bars);
+                self.draw_peaks_d2d(rt, settings, center, step, height, target_left, 0, true);
+
+                let mut target_right = (((inner.right - outer.left) as f32 - center) / step + 1.0).max(0.0) as usize;
+                target_right = target_right.min(half_data - 1);
+                if settings.bars { target_right += 1; }
+
+                self.draw_bars_d2d(rt, settings, center, step, height, target_right, half_data, false, settings.bars);
+                self.draw_peaks_d2d(rt, settings, center, step, height, target_right, half_data, false);
+            }
 
             let _ = dc_target.EndDraw(None, None);
 

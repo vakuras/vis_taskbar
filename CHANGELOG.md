@@ -5,13 +5,20 @@ All notable changes to vis_taskbar are documented in this file.
 ## [0.8.0] - 2026-04-01
 
 ### Added
-- **Per-pixel alpha transparency** — configurable background opacity (0=transparent, 1=solid black)
-- Spectrum bars stay fully opaque regardless of background setting
-- Uses `UpdateLayeredWindow` with `AC_SRC_ALPHA` for true per-pixel compositing
-- Background opacity control in Settings UI
+- **Per-pixel alpha transparency** — configurable background opacity (0%=transparent, 100%=solid)
+- **Invert direction** toggle — bars grow from edges toward center
+- 6 new unit tests (14 total): window types, backwards compat, freq weighting, roundtrip
+- Auto-apply — all settings take effect immediately without Apply button
+
+### Changed
+- Default opacity set to 50%
+- Opacity shown as percentage (0-100) instead of decimal
+- Removed Apply, Reset, Close buttons — only Restart Audio remains
+- Restart Audio button right-aligned
 
 ### Fixed
-- Gradient segment gaps (black lines between color segments) — added 0.5px overlap
+- Gradient segment gaps (black lines between color segments)
+- Inverted mode gap in the middle where channels meet
 
 ## [0.7.0] - 2026-04-01
 

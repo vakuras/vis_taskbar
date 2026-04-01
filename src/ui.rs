@@ -13,19 +13,17 @@ use std::sync::{Arc, Mutex};
 
 // Control IDs
 const IDC_BARS: u32 = 1002;
-const IDC_SLEEP_LABEL: u32 = 1003;
-const IDC_SLEEP_EDIT: u32 = 1004;
-const IDC_STEP_LABEL: u32 = 1005;
-const IDC_STEP_EDIT: u32 = 1006;
+const IDC_INVERT: u32 = 1003;
+const IDC_SLEEP_LABEL: u32 = 1004;
+const IDC_SLEEP_EDIT: u32 = 1005;
+const IDC_STEP_LABEL: u32 = 1006;
+const IDC_STEP_EDIT: u32 = 1007;
 const IDC_TOP_COLOR_BTN: u32 = 1010;
 const IDC_BOTTOM_COLOR_BTN: u32 = 1011;
 const IDC_PEAK_COLOR_BTN: u32 = 1012;
 const IDC_TOP_COLOR_SWATCH: u32 = 1020;
 const IDC_BOTTOM_COLOR_SWATCH: u32 = 1021;
 const IDC_PEAK_COLOR_SWATCH: u32 = 1022;
-const IDC_APPLY: u32 = 1030;
-const IDC_RESET: u32 = 1031;
-const IDC_CLOSE: u32 = 1032;
 const IDC_RESTART: u32 = 1033;
 // Section labels
 const IDC_SECTION_DISPLAY: u32 = 1040;
@@ -141,7 +139,7 @@ pub fn run_ui(
         let state_ptr = Box::into_raw(state);
 
         let win_w = 480;
-        let win_h = 600;
+        let win_h = 560;
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -234,10 +232,14 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     y += 26;
 
     create(w!("BUTTON"), "Bar Mode", BS_AUTOCHECKBOX as u32, pad + inner_pad, y, 120, 22, IDC_BARS);
+    create(w!("BUTTON"), "Invert direction", BS_AUTOCHECKBOX as u32, pad + inner_pad + 140, y, 140, 22, IDC_INVERT);
     y += 32;
 
     if settings.bars {
         SendDlgItemMessageW(hwnd, IDC_BARS as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
+    }
+    if settings.invert_direction {
+        SendDlgItemMessageW(hwnd, IDC_INVERT as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
     }
 
     // ── Timing section ──
@@ -303,9 +305,8 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     y += 28;
 
     // Opacity row
-    create(w!("STATIC"), "Background opacity", 0, pad + inner_pad, y + 2, 130, 20, IDC_OPACITY_LABEL);
-    create(w!("EDIT"), &format!("{:.1}", settings.opacity), WS_BORDER.0, pad + inner_pad + 135, y, 45, 22, IDC_OPACITY_EDIT);
-    create(w!("STATIC"), "(0=clear, 1=solid)", 0, pad + inner_pad + 190, y + 2, 150, 20, IDC_OPACITY_LABEL + 100);
+    create(w!("STATIC"), "Bg opacity %", 0, pad + inner_pad, y + 2, 100, 20, IDC_OPACITY_LABEL);
+    create(w!("EDIT"), &format!("{}", (settings.opacity * 100.0) as u32), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 105, y, 40, 22, IDC_OPACITY_EDIT);
     y += 32;
 
     // Set radio + checkbox states
@@ -326,21 +327,14 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
         SendDlgItemMessageW(hwnd, IDC_LOG_SPREAD as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
     }
 
-    // ── Action buttons — right-aligned ──
-    y += 8; // space above buttons
-    let btn_count = 4;
-    let btn_gap = 10;
+    // ── Restart button — right-aligned ──
+    y += 8;
     let btn_h = 32;
-    let btn_w = (client_w - btn_gap * (btn_count - 1)) / btn_count;
-    let btn_x = pad;
-
-    create_btn("Apply", btn_x, y, btn_w, btn_h, IDC_APPLY);
-    create_btn("Restart", btn_x + (btn_w + btn_gap), y, btn_w, btn_h, IDC_RESTART);
-    create_btn("Reset", btn_x + (btn_w + btn_gap) * 2, y, btn_w, btn_h, IDC_RESET);
-    create_btn("Close", btn_x + (btn_w + btn_gap) * 3, y, btn_w, btn_h, IDC_CLOSE);
+    let btn_w = 100;
+    create_btn("Restart Audio", pad + client_w - btn_w, y, btn_w, btn_h, IDC_RESTART);
     y += btn_h + 8;
 
-    // Preview area — plain static, GL renders directly into it
+    // Preview area
     create(w!("STATIC"), "", 0, pad, y, client_w, PREVIEW_HEIGHT, IDC_PREVIEW);
 }
 
@@ -394,11 +388,12 @@ fn set_checked(hwnd: HWND, id: u32, checked: bool) {
 
 fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
     set_checked(hwnd, IDC_BARS, settings.bars);
+    set_checked(hwnd, IDC_INVERT, settings.invert_direction);
     set_edit_u32(hwnd, IDC_SLEEP_EDIT, settings.sleep_time_ms);
     set_edit_u32(hwnd, IDC_STEP_EDIT, settings.step_multiplier);
     set_edit_u32(hwnd, IDC_CUTOFF_EDIT, settings.freq_cutoff_hz);
     set_edit_f32(hwnd, IDC_GAIN_EDIT, settings.gain);
-    set_edit_f32(hwnd, IDC_OPACITY_EDIT, settings.opacity);
+    set_edit_u32(hwnd, IDC_OPACITY_EDIT, (settings.opacity * 100.0) as u32);
     set_checked(hwnd, IDC_LOG_SPREAD, settings.log_spread);
 
     set_checked(hwnd, IDC_WINDOW_HANN, settings.window_type == crate::config::WindowType::Hann);
@@ -407,6 +402,36 @@ fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
     set_checked(hwnd, IDC_MERGE_MAX, settings.bin_merge == crate::config::BinMergeMode::Max);
     set_checked(hwnd, IDC_MERGE_AVG, settings.bin_merge == crate::config::BinMergeMode::Average);
 }
+
+/// Read all settings from UI controls, apply to shared state, and save.
+fn apply_all_settings(hwnd: HWND, state: &mut UiState) {
+    state.local.sleep_time_ms = get_edit_u32(hwnd, IDC_SLEEP_EDIT);
+    state.local.step_multiplier = get_edit_u32(hwnd, IDC_STEP_EDIT);
+    state.local.bars = is_checked(hwnd, IDC_BARS);
+    state.local.invert_direction = is_checked(hwnd, IDC_INVERT);
+    state.local.freq_cutoff_hz = get_edit_u32(hwnd, IDC_CUTOFF_EDIT);
+    state.local.log_spread = is_checked(hwnd, IDC_LOG_SPREAD);
+    state.local.gain = get_edit_f32(hwnd, IDC_GAIN_EDIT);
+    state.local.opacity = get_edit_u32(hwnd, IDC_OPACITY_EDIT).min(100) as f32 / 100.0;
+
+    state.local.window_type = if is_checked(hwnd, IDC_WINDOW_HAMMING) {
+        crate::config::WindowType::Hamming
+    } else if is_checked(hwnd, IDC_WINDOW_BH) {
+        crate::config::WindowType::BlackmanHarris
+    } else {
+        crate::config::WindowType::Hann
+    };
+
+    state.local.bin_merge = if is_checked(hwnd, IDC_MERGE_AVG) {
+        crate::config::BinMergeMode::Average
+    } else {
+        crate::config::BinMergeMode::Max
+    };
+
+    *state.settings.lock().unwrap() = state.local.clone();
+    let _ = state.local.save();
+}
+
 /// Enable immersive dark mode title bar and set border/caption colors.
 unsafe fn enable_dark_mode(hwnd: HWND) {
     // DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -535,7 +560,7 @@ unsafe extern "system" fn prefs_wnd_proc(
             let is_focus = (dis.itemState.0 & 0x0010) != 0;   // ODS_FOCUS
 
             // Choose colors: "Apply" gets accent, others get surface
-            let (bg, text, border) = if id == IDC_APPLY {
+            let (bg, text, border) = if id == IDC_RESTART {
                 if is_pressed {
                     (ACCENT_HOVER, BG_COLOR, ACCENT_COLOR)
                 } else {
@@ -622,66 +647,44 @@ unsafe extern "system" fn prefs_wnd_proc(
             let state = &mut *(state_ptr as *mut UiState);
             let cmd = (wparam.0 & 0xFFFF) as u32;
             let notify = ((wparam.0 >> 16) & 0xFFFF) as u32;
-            // BN_CLICKED = 0
-            let is_click = notify == 0;
+            let is_click = notify == 0; // BN_CLICKED
+            let is_edit_change = notify == 0x0300; // EN_CHANGE
 
             match cmd {
-                IDC_BARS if is_click => {
-                    state.local.bars = is_checked(hwnd, IDC_BARS);
-                }
+                // Color dialogs
                 IDC_TOP_COLOR_BTN => {
                     state.local.color_top = show_color_dialog(hwnd, state.local.color_top);
                     let _ = InvalidateRect(hwnd, None, true);
+                    apply_all_settings(hwnd, state);
                 }
                 IDC_BOTTOM_COLOR_BTN => {
                     state.local.color_bottom = show_color_dialog(hwnd, state.local.color_bottom);
                     let _ = InvalidateRect(hwnd, None, true);
+                    apply_all_settings(hwnd, state);
                 }
                 IDC_PEAK_COLOR_BTN => {
                     state.local.color_peaks = show_color_dialog(hwnd, state.local.color_peaks);
                     let _ = InvalidateRect(hwnd, None, true);
+                    apply_all_settings(hwnd, state);
                 }
-                IDC_APPLY => {
-                    state.local.sleep_time_ms = get_edit_u32(hwnd, IDC_SLEEP_EDIT);
-                    state.local.step_multiplier = get_edit_u32(hwnd, IDC_STEP_EDIT);
-                    state.local.bars = is_checked(hwnd, IDC_BARS);
-                    state.local.freq_cutoff_hz = get_edit_u32(hwnd, IDC_CUTOFF_EDIT);
-                    state.local.log_spread = is_checked(hwnd, IDC_LOG_SPREAD);
-                    state.local.gain = get_edit_f32(hwnd, IDC_GAIN_EDIT);
-                    state.local.opacity = get_edit_f32(hwnd, IDC_OPACITY_EDIT).clamp(0.0, 1.0);
-
-                    state.local.window_type = if is_checked(hwnd, IDC_WINDOW_HAMMING) {
-                        crate::config::WindowType::Hamming
-                    } else if is_checked(hwnd, IDC_WINDOW_BH) {
-                        crate::config::WindowType::BlackmanHarris
-                    } else {
-                        crate::config::WindowType::Hann
-                    };
-
-                    state.local.bin_merge = if is_checked(hwnd, IDC_MERGE_AVG) {
-                        crate::config::BinMergeMode::Average
-                    } else {
-                        crate::config::BinMergeMode::Max
-                    };
-
-                    *state.settings.lock().unwrap() = state.local.clone();
-                    if let Err(e) = state.local.save() {
-                        log::error!("Failed to save config: {e}");
-                    }
+                // Checkboxes and radios — auto-apply on click
+                IDC_BARS | IDC_INVERT | IDC_LOG_SPREAD |
+                IDC_WINDOW_HANN | IDC_WINDOW_HAMMING | IDC_WINDOW_BH |
+                IDC_MERGE_MAX | IDC_MERGE_AVG if is_click => {
+                    apply_all_settings(hwnd, state);
                 }
-                IDC_RESET => {
-                    state.local = state.settings.lock().unwrap().clone();
-                    sync_controls_from_settings(hwnd, &state.local);
-                    let _ = InvalidateRect(hwnd, None, true);
+                // Edit fields — auto-apply on change
+                IDC_SLEEP_EDIT | IDC_STEP_EDIT | IDC_CUTOFF_EDIT |
+                IDC_GAIN_EDIT | IDC_OPACITY_EDIT if is_edit_change => {
+                    apply_all_settings(hwnd, state);
                 }
-                IDC_CLOSE => {
-                    ShowWindow(hwnd, SW_HIDE);
-                }
+                // Restart audio
                 IDC_RESTART => {
                     (state.stop_fn)();
                     std::thread::sleep(std::time::Duration::from_millis(300));
                     (state.start_fn)();
                 }
+                // Tray commands
                 cmd if cmd == tray::CMD_SHOW_CONFIG => {
                     ShowWindow(hwnd, SW_SHOW);
                     let _ = SetForegroundWindow(hwnd);
