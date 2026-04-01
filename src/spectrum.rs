@@ -32,6 +32,7 @@ fn build_window(fft_size: usize, window_type: WindowType) -> Vec<f32> {
 }
 
 impl Spectrum {
+    #[allow(dead_code)]
     pub fn new(fft_size: usize) -> Self {
         Self::with_window(fft_size, WindowType::default())
     }
