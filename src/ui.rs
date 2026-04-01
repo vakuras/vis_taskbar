@@ -12,7 +12,6 @@ use windows::core::*;
 use std::sync::{Arc, Mutex};
 
 // Control IDs
-const IDC_FULL_TASKBAR: u32 = 1001;
 const IDC_BARS: u32 = 1002;
 const IDC_SLEEP_LABEL: u32 = 1003;
 const IDC_SLEEP_EDIT: u32 = 1004;
@@ -28,7 +27,7 @@ const IDC_APPLY: u32 = 1030;
 const IDC_RESET: u32 = 1031;
 const IDC_CLOSE: u32 = 1032;
 const IDC_RESTART: u32 = 1033;
-// Section labels (static text, no interaction)
+// Section labels
 const IDC_SECTION_DISPLAY: u32 = 1040;
 const IDC_SECTION_TIMING: u32 = 1041;
 const IDC_SECTION_COLORS: u32 = 1042;
@@ -36,7 +35,20 @@ const IDC_TOP_COLOR_LABEL: u32 = 1043;
 const IDC_BOTTOM_COLOR_LABEL: u32 = 1044;
 const IDC_PEAK_COLOR_LABEL: u32 = 1045;
 const IDC_PREVIEW: u32 = 1050;
-const IDC_SECTION_PREVIEW: u32 = 1051;
+// Advanced section
+const IDC_SECTION_ADVANCED: u32 = 1060;
+const IDC_WINDOW_HANN: u32 = 1061;
+const IDC_WINDOW_HAMMING: u32 = 1062;
+const IDC_WINDOW_BH: u32 = 1063;
+const IDC_CUTOFF_LABEL: u32 = 1064;
+const IDC_CUTOFF_EDIT: u32 = 1065;
+const IDC_MERGE_MAX: u32 = 1066;
+const IDC_MERGE_AVG: u32 = 1067;
+const IDC_LOG_SPREAD: u32 = 1068;
+const IDC_GAIN_LABEL: u32 = 1069;
+const IDC_GAIN_EDIT: u32 = 1070;
+const IDC_WINDOW_LABEL: u32 = 1071;
+const IDC_MERGE_LABEL: u32 = 1072;
 
 const PREVIEW_TIMER_ID: usize = 100;
 const PREVIEW_HEIGHT: i32 = 60;
@@ -127,12 +139,12 @@ pub fn run_ui(
         let state_ptr = Box::into_raw(state);
 
         let win_w = 480;
-        let win_h = 465;
+        let win_h = 570;
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PREFS_CLASS,
-            w!("vis_taskbar - Settings"),
+            w!("vis_taskbar v0.7.0 - Settings"),
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -258,20 +270,67 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     create(w!("STATIC"), "", 0, pad + inner_pad, y + 2, 24, 20, IDC_PEAK_COLOR_SWATCH);
     create(w!("STATIC"), "Peak line", 0, pad + inner_pad + 32, y + 2, 120, 20, IDC_PEAK_COLOR_LABEL);
     create_btn("Change...", right_edge - btn_change_w, y, btn_change_w, 24, IDC_PEAK_COLOR_BTN);
-    y += 44;
+    y += 38;
+
+    // ── Advanced section ──
+    create_section("SPECTRUM", pad, y, client_w, IDC_SECTION_ADVANCED);
+    y += 26;
+
+    // Window type: radio group
+    create(w!("STATIC"), "Window", 0, pad + inner_pad, y + 2, 55, 20, IDC_WINDOW_LABEL);
+    let radio_first = 0x0009u32 | WS_GROUP.0; // BS_AUTORADIOBUTTON | WS_GROUP
+    let radio = 0x0009u32;
+    create(w!("BUTTON"), "Hann", radio_first, pad + inner_pad + 60, y, 65, 20, IDC_WINDOW_HANN);
+    create(w!("BUTTON"), "Hamming", radio, pad + inner_pad + 130, y, 80, 20, IDC_WINDOW_HAMMING);
+    create(w!("BUTTON"), "Blackman", radio, pad + inner_pad + 215, y, 85, 20, IDC_WINDOW_BH);
+    y += 26;
+
+    // Bin merge: radio group
+    create(w!("STATIC"), "Merge", 0, pad + inner_pad, y + 2, 55, 20, IDC_MERGE_LABEL);
+    let radio_first2 = 0x0009u32 | WS_GROUP.0;
+    create(w!("BUTTON"), "Max", radio_first2, pad + inner_pad + 60, y, 65, 20, IDC_MERGE_MAX);
+    create(w!("BUTTON"), "Average", radio, pad + inner_pad + 130, y, 80, 20, IDC_MERGE_AVG);
+    y += 26;
+
+    // Cutoff + Gain + Log spread on one row
+    create(w!("STATIC"), "Cutoff (Hz)", 0, pad + inner_pad, y + 2, 80, 20, IDC_CUTOFF_LABEL);
+    create(w!("EDIT"), &settings.freq_cutoff_hz.to_string(), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 85, y, 55, 22, IDC_CUTOFF_EDIT);
+    create(w!("STATIC"), "Gain", 0, pad + inner_pad + 155, y + 2, 35, 20, IDC_GAIN_LABEL);
+    create(w!("EDIT"), &format!("{:.1}", settings.gain), WS_BORDER.0, pad + inner_pad + 195, y, 45, 22, IDC_GAIN_EDIT);
+    create(w!("BUTTON"), "Log spread", BS_AUTOCHECKBOX as u32, pad + inner_pad + 260, y, 100, 20, IDC_LOG_SPREAD);
+    y += 32;
+
+    // Set radio + checkbox states
+    let win_id = match settings.window_type {
+        crate::config::WindowType::Hann => IDC_WINDOW_HANN,
+        crate::config::WindowType::Hamming => IDC_WINDOW_HAMMING,
+        crate::config::WindowType::BlackmanHarris => IDC_WINDOW_BH,
+    };
+    SendDlgItemMessageW(hwnd, win_id as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
+
+    let merge_id = match settings.bin_merge {
+        crate::config::BinMergeMode::Max => IDC_MERGE_MAX,
+        crate::config::BinMergeMode::Average => IDC_MERGE_AVG,
+    };
+    SendDlgItemMessageW(hwnd, merge_id as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
+
+    if settings.log_spread {
+        SendDlgItemMessageW(hwnd, IDC_LOG_SPREAD as i32, BM_SETCHECK, WPARAM(1), LPARAM(0));
+    }
 
     // ── Action buttons — right-aligned ──
-    let btn_w = 85;
+    y += 8; // space above buttons
+    let btn_count = 4;
+    let btn_gap = 10;
     let btn_h = 32;
-    let btn_gap = 8;
-    let btns_total_w = btn_w * 4 + btn_gap * 3;
-    let btn_x = pad + client_w - btns_total_w;
+    let btn_w = (client_w - btn_gap * (btn_count - 1)) / btn_count;
+    let btn_x = pad;
 
     create_btn("Apply", btn_x, y, btn_w, btn_h, IDC_APPLY);
-    create_btn("Restart", btn_x + btn_w + btn_gap, y, btn_w, btn_h, IDC_RESTART);
+    create_btn("Restart", btn_x + (btn_w + btn_gap), y, btn_w, btn_h, IDC_RESTART);
     create_btn("Reset", btn_x + (btn_w + btn_gap) * 2, y, btn_w, btn_h, IDC_RESET);
     create_btn("Close", btn_x + (btn_w + btn_gap) * 3, y, btn_w, btn_h, IDC_CLOSE);
-    y += btn_h + 12;
+    y += btn_h + 8;
 
     // Preview area — plain static, GL renders directly into it
     create(w!("STATIC"), "", 0, pad, y, client_w, PREVIEW_HEIGHT, IDC_PREVIEW);
@@ -297,6 +356,25 @@ fn set_edit_u32(hwnd: HWND, id: u32, value: u32) {
     }
 }
 
+fn get_edit_f32(hwnd: HWND, id: u32) -> f32 {
+    unsafe {
+        let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
+        let mut buf = [0u16; 16];
+        let len = GetWindowTextW(ctrl, &mut buf);
+        let s = String::from_utf16_lossy(&buf[..len as usize]);
+        s.parse().unwrap_or(6.0)
+    }
+}
+
+fn set_edit_f32(hwnd: HWND, id: u32, value: f32) {
+    unsafe {
+        let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
+        let text = format!("{:.1}", value);
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        SetWindowTextW(ctrl, PCWSTR(wide.as_ptr()));
+    }
+}
+
 fn set_checked(hwnd: HWND, id: u32, checked: bool) {
     unsafe {
         SendDlgItemMessageW(
@@ -310,6 +388,15 @@ fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
     set_checked(hwnd, IDC_BARS, settings.bars);
     set_edit_u32(hwnd, IDC_SLEEP_EDIT, settings.sleep_time_ms);
     set_edit_u32(hwnd, IDC_STEP_EDIT, settings.step_multiplier);
+    set_edit_u32(hwnd, IDC_CUTOFF_EDIT, settings.freq_cutoff_hz);
+    set_edit_f32(hwnd, IDC_GAIN_EDIT, settings.gain);
+    set_checked(hwnd, IDC_LOG_SPREAD, settings.log_spread);
+
+    set_checked(hwnd, IDC_WINDOW_HANN, settings.window_type == crate::config::WindowType::Hann);
+    set_checked(hwnd, IDC_WINDOW_HAMMING, settings.window_type == crate::config::WindowType::Hamming);
+    set_checked(hwnd, IDC_WINDOW_BH, settings.window_type == crate::config::WindowType::BlackmanHarris);
+    set_checked(hwnd, IDC_MERGE_MAX, settings.bin_merge == crate::config::BinMergeMode::Max);
+    set_checked(hwnd, IDC_MERGE_AVG, settings.bin_merge == crate::config::BinMergeMode::Average);
 }
 /// Enable immersive dark mode title bar and set border/caption colors.
 unsafe fn enable_dark_mode(hwnd: HWND) {
@@ -549,6 +636,24 @@ unsafe extern "system" fn prefs_wnd_proc(
                     state.local.sleep_time_ms = get_edit_u32(hwnd, IDC_SLEEP_EDIT);
                     state.local.step_multiplier = get_edit_u32(hwnd, IDC_STEP_EDIT);
                     state.local.bars = is_checked(hwnd, IDC_BARS);
+                    state.local.freq_cutoff_hz = get_edit_u32(hwnd, IDC_CUTOFF_EDIT);
+                    state.local.log_spread = is_checked(hwnd, IDC_LOG_SPREAD);
+                    state.local.gain = get_edit_f32(hwnd, IDC_GAIN_EDIT);
+
+                    state.local.window_type = if is_checked(hwnd, IDC_WINDOW_HAMMING) {
+                        crate::config::WindowType::Hamming
+                    } else if is_checked(hwnd, IDC_WINDOW_BH) {
+                        crate::config::WindowType::BlackmanHarris
+                    } else {
+                        crate::config::WindowType::Hann
+                    };
+
+                    state.local.bin_merge = if is_checked(hwnd, IDC_MERGE_AVG) {
+                        crate::config::BinMergeMode::Average
+                    } else {
+                        crate::config::BinMergeMode::Max
+                    };
+
                     *state.settings.lock().unwrap() = state.local.clone();
                     if let Err(e) = state.local.save() {
                         log::error!("Failed to save config: {e}");

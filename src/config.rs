@@ -32,6 +32,33 @@ impl VisRgb {
     }
 }
 
+/// FFT window function type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowType {
+    Hann,
+    Hamming,
+    BlackmanHarris,
+}
+
+impl Default for WindowType {
+    fn default() -> Self {
+        Self::Hann
+    }
+}
+
+/// How to merge FFT bins when multiple map to one display bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BinMergeMode {
+    Max,
+    Average,
+}
+
+impl Default for BinMergeMode {
+    fn default() -> Self {
+        Self::Max
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub color_top: VisRgb,
@@ -40,7 +67,21 @@ pub struct Settings {
     pub step_multiplier: u32,
     pub sleep_time_ms: u32,
     pub bars: bool,
+    #[serde(default)]
+    pub window_type: WindowType,
+    #[serde(default = "default_freq_cutoff")]
+    pub freq_cutoff_hz: u32,
+    #[serde(default)]
+    pub bin_merge: BinMergeMode,
+    #[serde(default = "default_log_spread")]
+    pub log_spread: bool,
+    #[serde(default = "default_gain")]
+    pub gain: f32,
 }
+
+fn default_freq_cutoff() -> u32 { 18000 }
+fn default_log_spread() -> bool { false }
+fn default_gain() -> f32 { 6.0 }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -51,6 +92,11 @@ impl Default for Settings {
             step_multiplier: 1,
             sleep_time_ms: 15,
             bars: false,
+            window_type: WindowType::Hann,
+            freq_cutoff_hz: 18000,
+            bin_merge: BinMergeMode::Max,
+            log_spread: false,
+            gain: 6.0,
         }
     }
 }
