@@ -49,6 +49,8 @@ const IDC_GAIN_LABEL: u32 = 1069;
 const IDC_GAIN_EDIT: u32 = 1070;
 const IDC_WINDOW_LABEL: u32 = 1071;
 const IDC_MERGE_LABEL: u32 = 1072;
+const IDC_OPACITY_LABEL: u32 = 1073;
+const IDC_OPACITY_EDIT: u32 = 1074;
 
 const PREVIEW_TIMER_ID: usize = 100;
 const PREVIEW_HEIGHT: i32 = 60;
@@ -139,12 +141,12 @@ pub fn run_ui(
         let state_ptr = Box::into_raw(state);
 
         let win_w = 480;
-        let win_h = 570;
+        let win_h = 600;
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PREFS_CLASS,
-            w!("vis_taskbar v0.7.0 - Settings"),
+            w!("vis_taskbar v0.8.0 - Settings"),
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -298,6 +300,12 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     create(w!("STATIC"), "Gain", 0, pad + inner_pad + 155, y + 2, 35, 20, IDC_GAIN_LABEL);
     create(w!("EDIT"), &format!("{:.1}", settings.gain), WS_BORDER.0, pad + inner_pad + 195, y, 45, 22, IDC_GAIN_EDIT);
     create(w!("BUTTON"), "Log spread", BS_AUTOCHECKBOX as u32, pad + inner_pad + 260, y, 100, 20, IDC_LOG_SPREAD);
+    y += 28;
+
+    // Opacity row
+    create(w!("STATIC"), "Background opacity", 0, pad + inner_pad, y + 2, 130, 20, IDC_OPACITY_LABEL);
+    create(w!("EDIT"), &format!("{:.1}", settings.opacity), WS_BORDER.0, pad + inner_pad + 135, y, 45, 22, IDC_OPACITY_EDIT);
+    create(w!("STATIC"), "(0=clear, 1=solid)", 0, pad + inner_pad + 190, y + 2, 150, 20, IDC_OPACITY_LABEL + 100);
     y += 32;
 
     // Set radio + checkbox states
@@ -390,6 +398,7 @@ fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
     set_edit_u32(hwnd, IDC_STEP_EDIT, settings.step_multiplier);
     set_edit_u32(hwnd, IDC_CUTOFF_EDIT, settings.freq_cutoff_hz);
     set_edit_f32(hwnd, IDC_GAIN_EDIT, settings.gain);
+    set_edit_f32(hwnd, IDC_OPACITY_EDIT, settings.opacity);
     set_checked(hwnd, IDC_LOG_SPREAD, settings.log_spread);
 
     set_checked(hwnd, IDC_WINDOW_HANN, settings.window_type == crate::config::WindowType::Hann);
@@ -639,6 +648,7 @@ unsafe extern "system" fn prefs_wnd_proc(
                     state.local.freq_cutoff_hz = get_edit_u32(hwnd, IDC_CUTOFF_EDIT);
                     state.local.log_spread = is_checked(hwnd, IDC_LOG_SPREAD);
                     state.local.gain = get_edit_f32(hwnd, IDC_GAIN_EDIT);
+                    state.local.opacity = get_edit_f32(hwnd, IDC_OPACITY_EDIT).clamp(0.0, 1.0);
 
                     state.local.window_type = if is_checked(hwnd, IDC_WINDOW_HAMMING) {
                         crate::config::WindowType::Hamming

@@ -1,6 +1,6 @@
 [Setup]
 AppName=vis_taskbar
-AppVersion=0.7.0
+AppVersion=0.8.0
 AppPublisher=Vadim Kuras
 AppPublisherURL=https://github.com/vakuras/vis_taskbar
 DefaultDirName={autopf}\vis_taskbar
