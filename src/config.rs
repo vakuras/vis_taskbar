@@ -77,11 +77,14 @@ pub struct Settings {
     pub log_spread: bool,
     #[serde(default = "default_gain")]
     pub gain: f32,
+    #[serde(default = "default_opacity")]
+    pub opacity: f32,
 }
 
 fn default_freq_cutoff() -> u32 { 18000 }
 fn default_log_spread() -> bool { false }
 fn default_gain() -> f32 { 6.0 }
+fn default_opacity() -> f32 { 0.0 }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -97,6 +100,7 @@ impl Default for Settings {
             bin_merge: BinMergeMode::Max,
             log_spread: false,
             gain: 6.0,
+            opacity: 0.0,
         }
     }
 }

@@ -2,6 +2,17 @@
 
 All notable changes to vis_taskbar are documented in this file.
 
+## [0.8.0] - 2026-04-01
+
+### Added
+- **Per-pixel alpha transparency** — configurable background opacity (0=transparent, 1=solid black)
+- Spectrum bars stay fully opaque regardless of background setting
+- Uses `UpdateLayeredWindow` with `AC_SRC_ALPHA` for true per-pixel compositing
+- Background opacity control in Settings UI
+
+### Fixed
+- Gradient segment gaps (black lines between color segments) — added 0.5px overlap
+
 ## [0.7.0] - 2026-04-01
 
 ### Added
