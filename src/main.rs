@@ -49,10 +49,11 @@ fn main() {
             // Audio thread — sends directly to renderer
             let stop_a = stop.clone();
             let tx = frame_tx.clone();
+            let settings_a = settings.clone();
             std::thread::Builder::new()
                 .name("audio-capture".into())
                 .spawn(move || {
-                    audio::audio_thread(tx, stop_a);
+                    audio::audio_thread(tx, stop_a, settings_a);
                 })
                 .expect("Failed to spawn audio thread");
 

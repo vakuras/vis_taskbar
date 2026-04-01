@@ -1,9 +1,10 @@
+use crate::config::Settings;
 use crate::renderer::SpectrumFrame;
 use crate::spectrum::Spectrum;
 
 use crossbeam_channel::Sender;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use windows::core::*;
 use windows::Win32::Media::Audio::*;
@@ -15,6 +16,7 @@ const FFT_SIZE: usize = 256;
 pub fn audio_thread(
     frame_tx: Sender<SpectrumFrame>,
     stop: Arc<AtomicBool>,
+    settings: Arc<Mutex<Settings>>,
 ) {
     unsafe {
         let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -23,7 +25,7 @@ pub fn audio_thread(
             return;
         }
 
-        match run_capture(&frame_tx, &stop) {
+        match run_capture(&frame_tx, &stop, &settings) {
             Ok(()) => log::info!("Audio capture thread exiting normally"),
             Err(e) => log::error!("Audio capture failed: {e}"),
         }
@@ -35,6 +37,7 @@ pub fn audio_thread(
 unsafe fn run_capture(
     frame_tx: &Sender<SpectrumFrame>,
     stop: &Arc<AtomicBool>,
+    settings: &Arc<Mutex<Settings>>,
 ) -> Result<()> {
     // Get default render device for loopback
     let enumerator: IMMDeviceEnumerator =
@@ -75,9 +78,11 @@ unsafe fn run_capture(
     let capture_client: IAudioCaptureClient = audio_client.GetService()?;
     audio_client.Start()?;
 
-    let mut spectrum_left = Spectrum::new(FFT_SIZE);
-    let mut spectrum_right = Spectrum::new(FFT_SIZE);
+    let cfg = settings.lock().unwrap().clone();
+    let mut spectrum_left = Spectrum::with_window(FFT_SIZE, cfg.window_type);
+    let mut spectrum_right = Spectrum::with_window(FFT_SIZE, cfg.window_type);
     let bin_size = spectrum_left.bin_size();
+    let sample_rate = { wfx.nSamplesPerSec } as f32;
 
     // Accumulation buffer for interleaved float samples
     let samples_needed = FFT_SIZE * channels;
@@ -86,6 +91,12 @@ unsafe fn run_capture(
     while !stop.load(Ordering::Relaxed) {
         // Small sleep to let buffer fill
         std::thread::sleep(std::time::Duration::from_millis(5));
+
+        // Check for settings changes
+        if let Ok(s) = settings.try_lock() {
+            spectrum_left.set_window_type(s.window_type);
+            spectrum_right.set_window_type(s.window_type);
+        }
 
         loop {
             let mut data_ptr = std::ptr::null_mut();
@@ -123,6 +134,7 @@ unsafe fn run_capture(
 
             // Once we have enough samples, process FFT
             if sample_buf.len() >= samples_needed {
+                let cfg = settings.lock().unwrap().clone();
                 let left_mags = spectrum_left.process(&sample_buf, 0, channels);
                 let right_mags = if channels >= 2 {
                     spectrum_right.process(&sample_buf, 1, channels)
@@ -130,11 +142,37 @@ unsafe fn run_capture(
                     left_mags
                 };
 
-                // Convert to u8 values (0..255)
-                let mut values = vec![0u8; bin_size * 2];
-                for i in 0..bin_size {
-                    values[i] = (left_mags[i] * 255.0).min(255.0) as u8;
-                    values[i + bin_size] = (right_mags[i] * 255.0).min(255.0) as u8;
+                // Apply frequency cutoff and optional log spread
+                let cutoff_bin = ((cfg.freq_cutoff_hz as f32 / sample_rate) * FFT_SIZE as f32)
+                    .ceil() as usize;
+                let usable_bins = cutoff_bin.min(bin_size);
+                let output_size = bin_size; // keep same output size for renderer
+
+                let mut values = vec![0u8; output_size * 2];
+
+                if cfg.log_spread && usable_bins > 1 {
+                    // Log-spread: map output_size bars to usable_bins FFT bins
+                    // t^1.15 — very gentle curve
+                    for out in 0..output_size {
+                        let t0 = out as f32 / output_size as f32;
+                        let t1 = (out + 1) as f32 / output_size as f32;
+                        let start = (t0.powf(1.15) * usable_bins as f32) as usize;
+                        let end = ((t1.powf(1.15) * usable_bins as f32) as usize).max(start + 1).min(usable_bins);
+
+                        let left_val = merge_bins(left_mags, start, end, cfg.bin_merge);
+                        let right_val = merge_bins(right_mags, start, end, cfg.bin_merge);
+
+                        values[out] = (left_val * cfg.gain * 255.0).min(255.0) as u8;
+                        values[out + output_size] = (right_val * cfg.gain * 255.0).min(255.0) as u8;
+                    }
+                } else {
+                    // Linear: direct mapping with cutoff
+                    for i in 0..output_size {
+                        if i < usable_bins {
+                            values[i] = (left_mags[i] * cfg.gain * 255.0).min(255.0) as u8;
+                            values[i + output_size] = (right_mags[i] * cfg.gain * 255.0).min(255.0) as u8;
+                        }
+                    }
                 }
 
                 let _ = frame_tx.try_send(SpectrumFrame { values });
@@ -170,4 +208,18 @@ unsafe fn stuttering_fix(device: &IMMDevice) -> Result<()> {
     // Don't start, just release
     let _ = data;
     Ok(())
+}
+
+fn merge_bins(mags: &[f32], start: usize, end: usize, mode: crate::config::BinMergeMode) -> f32 {
+    if start >= end || start >= mags.len() { return 0.0; }
+    let end = end.min(mags.len());
+    match mode {
+        crate::config::BinMergeMode::Max => {
+            mags[start..end].iter().cloned().fold(0.0f32, f32::max)
+        }
+        crate::config::BinMergeMode::Average => {
+            let sum: f32 = mags[start..end].iter().sum();
+            sum / (end - start) as f32
+        }
+    }
 }

@@ -1,26 +1,44 @@
+use crate::config::WindowType;
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::f32::consts::PI;
 
-/// Hamming-windowed FFT spectrum analyzer.
+/// Configurable-window FFT spectrum analyzer.
 /// Accepts `fft_size` real samples, produces `fft_size/2` magnitude bins in 0..=1 range.
 pub struct Spectrum {
     fft_size: usize,
     bin_size: usize,
     window: Vec<f32>,
+    window_type: WindowType,
     planner_buf: Vec<Complex<f32>>,
     scratch: Vec<Complex<f32>>,
     magnitudes: Vec<f32>,
     fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
 }
 
+fn build_window(fft_size: usize, window_type: WindowType) -> Vec<f32> {
+    let n = (fft_size - 1) as f32;
+    (0..fft_size)
+        .map(|i| {
+            let t = 2.0 * PI * i as f32 / n;
+            match window_type {
+                WindowType::Hann => 0.5 * (1.0 - t.cos()),
+                WindowType::Hamming => 0.54 - 0.46 * t.cos(),
+                WindowType::BlackmanHarris => {
+                    0.35875 - 0.48829 * t.cos() + 0.14128 * (2.0 * t).cos() - 0.01168 * (3.0 * t).cos()
+                }
+            }
+        })
+        .collect()
+}
+
 impl Spectrum {
     pub fn new(fft_size: usize) -> Self {
-        let bin_size = fft_size / 2;
+        Self::with_window(fft_size, WindowType::default())
+    }
 
-        // Hamming window
-        let window: Vec<f32> = (0..fft_size)
-            .map(|i| 0.54 - 0.46 * (2.0 * PI * i as f32 / (fft_size - 1) as f32).cos())
-            .collect();
+    pub fn with_window(fft_size: usize, window_type: WindowType) -> Self {
+        let bin_size = fft_size / 2;
+        let window = build_window(fft_size, window_type);
 
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft_forward(fft_size);
@@ -30,10 +48,19 @@ impl Spectrum {
             fft_size,
             bin_size,
             window,
+            window_type,
             planner_buf: vec![Complex::default(); fft_size],
             scratch,
             magnitudes: vec![0.0; bin_size],
             fft,
+        }
+    }
+
+    /// Update window type if changed.
+    pub fn set_window_type(&mut self, wt: WindowType) {
+        if self.window_type != wt {
+            self.window = build_window(self.fft_size, wt);
+            self.window_type = wt;
         }
     }
 
@@ -70,7 +97,10 @@ impl Spectrum {
         for i in 0..self.bin_size {
             let c = self.planner_buf[i];
             let mag = (c.re * c.re + c.im * c.im).sqrt() * norm;
-            self.magnitudes[i] = (mag * 4.0).min(1.0);
+            // Frequency-weighted gain: boost higher bins to compensate for
+            // natural 1/f energy falloff. sqrt(1 + bin_index) gives ~3dB/octave boost.
+            let freq_weight = (1.0 + i as f32).sqrt();
+            self.magnitudes[i] = (mag * freq_weight).min(1.0);
         }
 
         &self.magnitudes
