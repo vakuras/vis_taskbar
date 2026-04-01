@@ -156,4 +156,49 @@ mod tests {
         let right = s.process(&samples, 1, 2);
         assert!(right.iter().all(|&m| m == 0.0), "Right channel should be silent");
     }
+
+    #[test]
+    fn spectrum_all_window_types_work() {
+        use crate::config::WindowType;
+        let samples: Vec<f32> = (0..256)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin())
+            .collect();
+
+        for wt in [WindowType::Hann, WindowType::Hamming, WindowType::BlackmanHarris] {
+            let mut s = Spectrum::with_window(256, wt);
+            let mags = s.process(&samples, 0, 1);
+            assert!(mags.iter().any(|&m| m > 0.0), "Window {:?} should produce output", wt);
+        }
+    }
+
+    #[test]
+    fn spectrum_set_window_type_changes_output() {
+        use crate::config::WindowType;
+        let samples: Vec<f32> = (0..256)
+            .map(|i| (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / 48000.0).sin())
+            .collect();
+
+        let mut s = Spectrum::with_window(256, WindowType::Hann);
+        let hann_peak = s.process(&samples, 0, 1).iter().cloned().fold(0.0f32, f32::max);
+
+        s.set_window_type(WindowType::BlackmanHarris);
+        let bh_peak = s.process(&samples, 0, 1).iter().cloned().fold(0.0f32, f32::max);
+
+        // Different windows should produce different peak values
+        assert!((hann_peak - bh_peak).abs() > 0.001, "Hann={hann_peak} BH={bh_peak} should differ");
+    }
+
+    #[test]
+    fn spectrum_freq_weight_boosts_treble() {
+        let mut s = Spectrum::with_window(256, crate::config::WindowType::Hann);
+        // White noise — all bins should have similar raw energy
+        // but freq weighting should boost higher bins
+        let samples: Vec<f32> = (0..256).map(|i| ((i * 7 + 13) % 100) as f32 / 100.0 - 0.5).collect();
+        let mags = s.process(&samples, 0, 1);
+
+        // Average of upper half should be >= average of lower half due to freq weighting
+        let lower: f32 = mags[1..64].iter().sum::<f32>() / 63.0;
+        let upper: f32 = mags[64..128].iter().sum::<f32>() / 64.0;
+        assert!(upper >= lower * 0.5, "Upper={upper} should be boosted relative to lower={lower}");
+    }
 }

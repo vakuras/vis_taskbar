@@ -68,6 +68,8 @@ pub struct Settings {
     pub sleep_time_ms: u32,
     pub bars: bool,
     #[serde(default)]
+    pub invert_direction: bool,
+    #[serde(default)]
     pub window_type: WindowType,
     #[serde(default = "default_freq_cutoff")]
     pub freq_cutoff_hz: u32,
@@ -84,7 +86,7 @@ pub struct Settings {
 fn default_freq_cutoff() -> u32 { 18000 }
 fn default_log_spread() -> bool { false }
 fn default_gain() -> f32 { 6.0 }
-fn default_opacity() -> f32 { 0.0 }
+fn default_opacity() -> f32 { 0.5 }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -95,12 +97,13 @@ impl Default for Settings {
             step_multiplier: 1,
             sleep_time_ms: 15,
             bars: false,
+            invert_direction: false,
             window_type: WindowType::Hann,
             freq_cutoff_hz: 18000,
             bin_merge: BinMergeMode::Max,
             log_spread: false,
             gain: 6.0,
-            opacity: 0.0,
+            opacity: 0.5,
         }
     }
 }
@@ -171,5 +174,71 @@ mod tests {
     fn visrgb_black_white() {
         assert_eq!(VisRgb::new(0.0, 0.0, 0.0).to_colorref(), 0);
         assert_eq!(VisRgb::new(1.0, 1.0, 1.0).to_colorref(), 0x00FFFFFF);
+    }
+
+    #[test]
+    fn default_new_fields() {
+        let s = Settings::default();
+        assert_eq!(s.window_type, WindowType::Hann);
+        assert_eq!(s.bin_merge, BinMergeMode::Max);
+        assert_eq!(s.freq_cutoff_hz, 18000);
+        assert!((s.gain - 6.0).abs() < 0.01);
+        assert!((s.opacity - 0.5).abs() < 0.01);
+        assert!(!s.log_spread);
+        assert!(!s.invert_direction);
+    }
+
+    #[test]
+    fn settings_roundtrip_all_fields() {
+        let mut s = Settings::default();
+        s.window_type = WindowType::BlackmanHarris;
+        s.bin_merge = BinMergeMode::Average;
+        s.freq_cutoff_hz = 16000;
+        s.gain = 8.5;
+        s.opacity = 0.75;
+        s.log_spread = true;
+        s.invert_direction = true;
+        s.bars = true;
+
+        let toml_str = toml::to_string_pretty(&s).unwrap();
+        let s2: Settings = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(s.window_type, s2.window_type);
+        assert_eq!(s.bin_merge, s2.bin_merge);
+        assert_eq!(s.freq_cutoff_hz, s2.freq_cutoff_hz);
+        assert!((s.gain - s2.gain).abs() < 0.01);
+        assert!((s.opacity - s2.opacity).abs() < 0.01);
+        assert_eq!(s.log_spread, s2.log_spread);
+        assert_eq!(s.invert_direction, s2.invert_direction);
+        assert_eq!(s.bars, s2.bars);
+    }
+
+    #[test]
+    fn settings_backwards_compat() {
+        // Old config without new fields should still load with defaults
+        let old_toml = r#"
+            step_multiplier = 2
+            sleep_time_ms = 20
+            bars = true
+            [color_top]
+            r = 0.0
+            g = 1.0
+            b = 0.0
+            [color_bottom]
+            r = 0.0
+            g = 0.0
+            b = 1.0
+            [color_peaks]
+            r = 1.0
+            g = 1.0
+            b = 1.0
+        "#;
+        let s: Settings = toml::from_str(old_toml).unwrap();
+        assert_eq!(s.step_multiplier, 2);
+        assert!(s.bars);
+        // New fields should get defaults
+        assert_eq!(s.window_type, WindowType::Hann);
+        assert!((s.gain - 6.0).abs() < 0.01);
+        assert!(!s.invert_direction);
     }
 }
