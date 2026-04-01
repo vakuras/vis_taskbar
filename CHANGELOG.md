@@ -2,6 +2,18 @@
 
 All notable changes to vis_taskbar are documented in this file.
 
+## [0.6.0] - 2026-04-01
+
+### Changed
+- **Replaced OpenGL with Direct2D** — no more legacy GL dependency
+- Smooth fill mode now uses D2D path geometry (filled trapezoids)
+- Bar mode uses D2D FillRectangle
+- Peak lines use D2D DrawLine
+- Preview rendering also uses Direct2D
+
+### Removed
+- OpenGL dependency (`Win32_Graphics_OpenGL`)
+
 ## [0.5.4] - 2026-03-31
 
 ### Fixed
