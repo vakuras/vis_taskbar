@@ -2,6 +2,20 @@
 
 All notable changes to vis_taskbar are documented in this file.
 
+## [0.7.0] - 2026-04-01
+
+### Added
+- **Configurable spectrum settings** — Window type (Hann/Hamming/Blackman-Harris), Bin merge mode (Max/Average), Frequency cutoff, Gain, Log spread
+- Advanced "SPECTRUM" section in settings UI with radio buttons, edit fields, and checkbox
+- Frequency-weighted gain — higher frequencies boosted for better visibility
+- Hann window as default (cleaner spectral peaks)
+- Version number shown in settings window title
+
+### Changed
+- Default gain increased to 6.0 for better bar visibility
+- Buttons now span full dialog width, aligned with section titles
+- Frequency cutoff defaults to 18kHz (cuts inaudible frequencies)
+
 ## [0.6.0] - 2026-04-01
 
 ### Changed
