@@ -2,6 +2,22 @@
 
 All notable changes to vis_taskbar are documented in this file.
 
+## [0.8.1] - 2026-04-01
+
+### Added
+- **Theme-colored background** — uses Windows accent color instead of black
+- **Gain & opacity sliders** — trackbar controls replace text fields for easier adjustment
+
+### Fixed
+- Peak lines no longer draw at zero when no audio is playing
+- Removed dead cutoff UI code (cutoff kept at 18kHz in config)
+- Cleaned up unused constants and functions
+
+### Changed
+- Gain control: slider range 2–10 (default 6)
+- Opacity control: slider range 0–100% (default 50%)
+- Restart button label shortened to "Restart"
+
 ## [0.8.0] - 2026-04-01
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "vis_taskbar"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 description = "Audio spectrum visualizer rendered on the Windows taskbar"
 authors = ["Vadim Kuras"]

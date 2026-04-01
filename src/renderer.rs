@@ -3,6 +3,7 @@ use crate::config::Settings;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
+use windows::Win32::Graphics::Dwm::DwmGetColorizationColor;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -191,14 +192,6 @@ impl Renderer {
         self.render_d2d(outer, inner, settings);
     }
 
-    fn get_render_target(&self) -> Option<&ID2D1RenderTarget> {
-        if self.is_preview {
-            self.hwnd_target.as_ref().map(|t| t as &ID2D1RenderTarget)
-        } else {
-            self.dc_target.as_ref().map(|t| t as &ID2D1RenderTarget)
-        }
-    }
-
     fn render_d2d(&self, outer: &RECT, inner: &RECT, settings: &Settings) {
         let Some(ref dc_target) = self.dc_target else { return };
         let height = (inner.bottom - inner.top) as f32;
@@ -216,9 +209,15 @@ impl Renderer {
             let _ = dc_target.BindDC(self.mem_dc, &rc);
 
             dc_target.BeginDraw();
-            // Clear with configurable opacity
+            // Clear with Windows theme color at configurable opacity
             let bg_alpha = settings.opacity.clamp(0.0, 1.0);
-            dc_target.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: bg_alpha }));
+            let (bg_r, bg_g, bg_b) = get_theme_color();
+            dc_target.Clear(Some(&D2D1_COLOR_F {
+                r: bg_r * bg_alpha,
+                g: bg_g * bg_alpha,
+                b: bg_b * bg_alpha,
+                a: bg_alpha,
+            }));
 
             let rt: &ID2D1RenderTarget = dc_target;
 
@@ -258,7 +257,7 @@ impl Renderer {
             let _ = dc_target.EndDraw(None, None);
 
             // Blit to screen via UpdateLayeredWindow with per-pixel alpha
-            let mut pt_src = POINT { x: 0, y: 0 };
+            let pt_src = POINT { x: 0, y: 0 };
             let mut pt_dst = POINT::default();
             GetWindowRect(self.hwnd, &mut std::mem::zeroed::<RECT>() as *mut RECT);
             let mut win_rect = RECT::default();
@@ -266,7 +265,7 @@ impl Renderer {
             pt_dst.x = win_rect.left;
             pt_dst.y = win_rect.top;
 
-            let mut sz = SIZE { cx: self.width, cy: self.height };
+            let sz = SIZE { cx: self.width, cy: self.height };
             let blend = BLENDFUNCTION {
                 BlendOp: 0, // AC_SRC_OVER
                 BlendFlags: 0,
@@ -369,6 +368,7 @@ impl Renderer {
             for i in 0..count.saturating_sub(1) {
                 let val1 = self.vis_peak_falloff[i + offset] as f32 * height / 255.0;
                 let val2 = self.vis_peak_falloff[i + 1 + offset] as f32 * height / 255.0;
+                if val1 <= 0.0 && val2 <= 0.0 { continue; }
 
                 let (x1, x2) = if is_left {
                     (center - i as f32 * step, center - (i as f32 + 1.0) * step)
@@ -574,6 +574,22 @@ pub fn render_loop(
     }
 
     renderer.cleanup();
+}
+
+/// Get the Windows theme/accent color as RGB floats (0..1).
+fn get_theme_color() -> (f32, f32, f32) {
+    unsafe {
+        let mut color: u32 = 0;
+        let mut opaque = BOOL(0);
+        if DwmGetColorizationColor(&mut color, &mut opaque).is_ok() {
+            let r = ((color >> 16) & 0xFF) as f32 / 255.0;
+            let g = ((color >> 8) & 0xFF) as f32 / 255.0;
+            let b = (color & 0xFF) as f32 / 255.0;
+            (r, g, b)
+        } else {
+            (0.0, 0.0, 0.0) // fallback to black
+        }
+    }
 }
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

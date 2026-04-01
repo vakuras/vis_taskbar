@@ -38,8 +38,7 @@ const IDC_SECTION_ADVANCED: u32 = 1060;
 const IDC_WINDOW_HANN: u32 = 1061;
 const IDC_WINDOW_HAMMING: u32 = 1062;
 const IDC_WINDOW_BH: u32 = 1063;
-const IDC_CUTOFF_LABEL: u32 = 1064;
-const IDC_CUTOFF_EDIT: u32 = 1065;
+const IDC_GAIN_VAL: u32 = 1075;
 const IDC_MERGE_MAX: u32 = 1066;
 const IDC_MERGE_AVG: u32 = 1067;
 const IDC_LOG_SPREAD: u32 = 1068;
@@ -48,7 +47,8 @@ const IDC_GAIN_EDIT: u32 = 1070;
 const IDC_WINDOW_LABEL: u32 = 1071;
 const IDC_MERGE_LABEL: u32 = 1072;
 const IDC_OPACITY_LABEL: u32 = 1073;
-const IDC_OPACITY_EDIT: u32 = 1074;
+const IDC_OPACITY_SLIDER: u32 = 1074;
+const IDC_OPACITY_VAL: u32 = 1076;
 
 const PREVIEW_TIMER_ID: usize = 100;
 const PREVIEW_HEIGHT: i32 = 60;
@@ -60,7 +60,7 @@ const BG_COLOR: u32 = 0x0028201E;       // #1e2028 base background
 const SURFACE_COLOR: u32 = 0x00362A28;  // #282a36 surface/card
 const OVERLAY_COLOR: u32 = 0x00211816;  // #161821 input/overlay
 const TEXT_COLOR: u32 = 0x00EDEAE8;     // #e8eaed primary text
-const TEXT_DIM: u32 = 0x00A6A09A;       // #9aa0a6 secondary text
+const _TEXT_DIM: u32 = 0x00A6A09A;      // #9aa0a6 secondary text (reserved)
 const ACCENT_COLOR: u32 = 0x00F8B48A;   // #8ab4f8 blue accent
 const ACCENT_HOVER: u32 = 0x00FACBAE;   // #aecbfa accent hover
 const BORDER_COLOR: u32 = 0x004A3B38;   // #383b4a border
@@ -139,7 +139,7 @@ pub fn run_ui(
         let state_ptr = Box::into_raw(state);
 
         let win_w = 480;
-        let win_h = 560;
+        let win_h = 600;
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -296,17 +296,23 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     create(w!("BUTTON"), "Average", radio, pad + inner_pad + 130, y, 80, 20, IDC_MERGE_AVG);
     y += 26;
 
-    // Cutoff + Gain + Log spread on one row
-    create(w!("STATIC"), "Cutoff (Hz)", 0, pad + inner_pad, y + 2, 80, 20, IDC_CUTOFF_LABEL);
-    create(w!("EDIT"), &settings.freq_cutoff_hz.to_string(), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 85, y, 55, 22, IDC_CUTOFF_EDIT);
-    create(w!("STATIC"), "Gain", 0, pad + inner_pad + 155, y + 2, 35, 20, IDC_GAIN_LABEL);
-    create(w!("EDIT"), &format!("{:.1}", settings.gain), WS_BORDER.0, pad + inner_pad + 195, y, 45, 22, IDC_GAIN_EDIT);
+    // Gain slider + Log spread row
+    create(w!("STATIC"), "Gain", 0, pad + inner_pad, y + 2, 35, 20, IDC_GAIN_LABEL);
+    let gain_slider = create(w!("msctls_trackbar32"), "", 0, pad + inner_pad + 40, y, 180, 22, IDC_GAIN_EDIT);
+    SendMessageW(gain_slider, 0x0406, WPARAM(1), LPARAM(2));  // TBM_SETRANGEMIN = 2
+    SendMessageW(gain_slider, 0x0408, WPARAM(1), LPARAM(10)); // TBM_SETRANGEMAX = 10
+    SendMessageW(gain_slider, 0x0405, WPARAM(1), LPARAM(settings.gain as isize)); // TBM_SETPOS
+    create(w!("STATIC"), &format!("{}", settings.gain as u32), 0, pad + inner_pad + 225, y + 2, 25, 20, IDC_GAIN_VAL);
     create(w!("BUTTON"), "Log spread", BS_AUTOCHECKBOX as u32, pad + inner_pad + 260, y, 100, 20, IDC_LOG_SPREAD);
     y += 28;
 
-    // Opacity row
-    create(w!("STATIC"), "Bg opacity %", 0, pad + inner_pad, y + 2, 100, 20, IDC_OPACITY_LABEL);
-    create(w!("EDIT"), &format!("{}", (settings.opacity * 100.0) as u32), WS_BORDER.0 | ES_NUMBER as u32, pad + inner_pad + 105, y, 40, 22, IDC_OPACITY_EDIT);
+    // Opacity slider row
+    create(w!("STATIC"), "Opacity", 0, pad + inner_pad, y + 2, 55, 20, IDC_OPACITY_LABEL);
+    let opacity_slider = create(w!("msctls_trackbar32"), "", 0, pad + inner_pad + 60, y, 230, 22, IDC_OPACITY_SLIDER);
+    SendMessageW(opacity_slider, 0x0406, WPARAM(1), LPARAM(0));   // TBM_SETRANGEMIN = 0
+    SendMessageW(opacity_slider, 0x0408, WPARAM(1), LPARAM(100)); // TBM_SETRANGEMAX = 100
+    SendMessageW(opacity_slider, 0x0405, WPARAM(1), LPARAM((settings.opacity * 100.0) as isize)); // TBM_SETPOS
+    create(w!("STATIC"), &format!("{}%", (settings.opacity * 100.0) as u32), 0, pad + inner_pad + 295, y + 2, 45, 20, IDC_OPACITY_VAL);
     y += 32;
 
     // Set radio + checkbox states
@@ -331,7 +337,7 @@ unsafe fn create_controls(hwnd: HWND, hinstance: HINSTANCE, settings: &Settings)
     y += 8;
     let btn_h = 32;
     let btn_w = 100;
-    create_btn("Restart Audio", pad + client_w - btn_w, y, btn_w, btn_h, IDC_RESTART);
+    create_btn("Restart", pad + client_w - btn_w, y, btn_w, btn_h, IDC_RESTART);
     y += btn_h + 8;
 
     // Preview area
@@ -347,8 +353,9 @@ fn get_edit_u32(hwnd: HWND, id: u32) -> u32 {
         s.parse().unwrap_or(1)
     }
 }
-
+
 
+#[allow(dead_code)]
 fn set_edit_u32(hwnd: HWND, id: u32, value: u32) {
     unsafe {
         let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
@@ -357,7 +364,8 @@ fn set_edit_u32(hwnd: HWND, id: u32, value: u32) {
         SetWindowTextW(ctrl, PCWSTR(wide.as_ptr()));
     }
 }
-
+
+#[allow(dead_code)]
 fn get_edit_f32(hwnd: HWND, id: u32) -> f32 {
     unsafe {
         let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
@@ -368,6 +376,22 @@ fn get_edit_f32(hwnd: HWND, id: u32) -> f32 {
     }
 }
 
+fn get_slider_val(hwnd: HWND, id: u32) -> i32 {
+    unsafe {
+        let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
+        SendMessageW(ctrl, 0x0400, WPARAM(0), LPARAM(0)).0 as i32 // TBM_GETPOS
+    }
+}
+
+#[allow(dead_code)]
+fn set_slider_val(hwnd: HWND, id: u32, val: i32) {
+    unsafe {
+        let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
+        SendMessageW(ctrl, 0x0405, WPARAM(1), LPARAM(val as isize)); // TBM_SETPOS
+    }
+}
+
+#[allow(dead_code)]
 fn set_edit_f32(hwnd: HWND, id: u32, value: f32) {
     unsafe {
         let ctrl = GetDlgItem(hwnd, id as i32).unwrap_or_default();
@@ -376,7 +400,8 @@ fn set_edit_f32(hwnd: HWND, id: u32, value: f32) {
         SetWindowTextW(ctrl, PCWSTR(wide.as_ptr()));
     }
 }
-
+
+#[allow(dead_code)]
 fn set_checked(hwnd: HWND, id: u32, checked: bool) {
     unsafe {
         SendDlgItemMessageW(
@@ -385,15 +410,15 @@ fn set_checked(hwnd: HWND, id: u32, checked: bool) {
         );
     }
 }
-
+
+#[allow(dead_code)]
 fn sync_controls_from_settings(hwnd: HWND, settings: &Settings) {
     set_checked(hwnd, IDC_BARS, settings.bars);
     set_checked(hwnd, IDC_INVERT, settings.invert_direction);
     set_edit_u32(hwnd, IDC_SLEEP_EDIT, settings.sleep_time_ms);
     set_edit_u32(hwnd, IDC_STEP_EDIT, settings.step_multiplier);
-    set_edit_u32(hwnd, IDC_CUTOFF_EDIT, settings.freq_cutoff_hz);
-    set_edit_f32(hwnd, IDC_GAIN_EDIT, settings.gain);
-    set_edit_u32(hwnd, IDC_OPACITY_EDIT, (settings.opacity * 100.0) as u32);
+    set_slider_val(hwnd, IDC_GAIN_EDIT, settings.gain as i32);
+    set_slider_val(hwnd, IDC_OPACITY_SLIDER, (settings.opacity * 100.0) as i32);
     set_checked(hwnd, IDC_LOG_SPREAD, settings.log_spread);
 
     set_checked(hwnd, IDC_WINDOW_HANN, settings.window_type == crate::config::WindowType::Hann);
@@ -409,10 +434,10 @@ fn apply_all_settings(hwnd: HWND, state: &mut UiState) {
     state.local.step_multiplier = get_edit_u32(hwnd, IDC_STEP_EDIT);
     state.local.bars = is_checked(hwnd, IDC_BARS);
     state.local.invert_direction = is_checked(hwnd, IDC_INVERT);
-    state.local.freq_cutoff_hz = get_edit_u32(hwnd, IDC_CUTOFF_EDIT);
+    // freq_cutoff_hz kept at loaded value (no UI control)
     state.local.log_spread = is_checked(hwnd, IDC_LOG_SPREAD);
-    state.local.gain = get_edit_f32(hwnd, IDC_GAIN_EDIT);
-    state.local.opacity = get_edit_u32(hwnd, IDC_OPACITY_EDIT).min(100) as f32 / 100.0;
+    state.local.gain = get_slider_val(hwnd, IDC_GAIN_EDIT) as f32;
+    state.local.opacity = get_slider_val(hwnd, IDC_OPACITY_SLIDER) as f32 / 100.0;
 
     state.local.window_type = if is_checked(hwnd, IDC_WINDOW_HAMMING) {
         crate::config::WindowType::Hamming
@@ -639,6 +664,26 @@ unsafe extern "system" fn prefs_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_HSCROLL => {
+            // Trackbar slider changed
+            let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+            if state_ptr != 0 {
+                let state = &mut *(state_ptr as *mut UiState);
+                apply_all_settings(hwnd, state);
+                // Update value labels
+                let gain_val = get_slider_val(hwnd, IDC_GAIN_EDIT);
+                let opacity_pct = get_slider_val(hwnd, IDC_OPACITY_SLIDER);
+                let gain_ctrl = GetDlgItem(hwnd, IDC_GAIN_VAL as i32).unwrap_or_default();
+                let opacity_ctrl = GetDlgItem(hwnd, IDC_OPACITY_VAL as i32).unwrap_or_default();
+                let gt = format!("{}", gain_val);
+                let ot = format!("{}%", opacity_pct);
+                let gw: Vec<u16> = gt.encode_utf16().chain(std::iter::once(0)).collect();
+                let ow: Vec<u16> = ot.encode_utf16().chain(std::iter::once(0)).collect();
+                SetWindowTextW(gain_ctrl, PCWSTR(gw.as_ptr()));
+                SetWindowTextW(opacity_ctrl, PCWSTR(ow.as_ptr()));
+            }
+            LRESULT(0)
+        }
         WM_COMMAND => {
             let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
             if state_ptr == 0 {
@@ -648,7 +693,7 @@ unsafe extern "system" fn prefs_wnd_proc(
             let cmd = (wparam.0 & 0xFFFF) as u32;
             let notify = ((wparam.0 >> 16) & 0xFFFF) as u32;
             let is_click = notify == 0; // BN_CLICKED
-            let is_edit_change = notify == 0x0300; // EN_CHANGE
+            let is_edit_change = notify == 0x0200; // EN_KILLFOCUS — apply when leaving field
 
             match cmd {
                 // Color dialogs
@@ -673,9 +718,9 @@ unsafe extern "system" fn prefs_wnd_proc(
                 IDC_MERGE_MAX | IDC_MERGE_AVG if is_click => {
                     apply_all_settings(hwnd, state);
                 }
-                // Edit fields — auto-apply on change
-                IDC_SLEEP_EDIT | IDC_STEP_EDIT | IDC_CUTOFF_EDIT |
-                IDC_GAIN_EDIT | IDC_OPACITY_EDIT if is_edit_change => {
+                // Edit fields — apply on focus loss
+                IDC_SLEEP_EDIT | IDC_STEP_EDIT |
+                IDC_GAIN_EDIT if is_edit_change => {
                     apply_all_settings(hwnd, state);
                 }
                 // Restart audio
