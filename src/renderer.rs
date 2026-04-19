@@ -20,6 +20,7 @@ pub struct SpectrumFrame {
 
 pub struct Renderer {
     hwnd: HWND,
+    taskbar_hwnd: HWND,
     width: i32,
     height: i32,
     factory: Option<ID2D1Factory>,
@@ -40,6 +41,7 @@ impl Renderer {
     pub fn new(data_size: usize) -> Self {
         Self {
             hwnd: HWND::default(),
+            taskbar_hwnd: HWND::default(),
             width: 0,
             height: 0,
             factory: None,
@@ -56,7 +58,7 @@ impl Renderer {
         }
     }
 
-    pub fn init_window(&mut self, taskbar_rect: &RECT) -> Result<()> {
+    pub fn init_window(&mut self, taskbar_rect: &RECT, taskbar_hwnd: HWND) -> Result<()> {
         unsafe {
             let hinstance: HINSTANCE = std::mem::transmute(GetModuleHandleW(None)?);
 
@@ -79,8 +81,9 @@ impl Renderer {
             let w = taskbar_rect.right - taskbar_rect.left;
             let h = taskbar_rect.bottom - taskbar_rect.top;
 
+            // WS_EX_TRANSPARENT: clicks pass through to taskbar
             let hwnd = CreateWindowExW(
-                WS_EX_TOOLWINDOW | WS_EX_LAYERED,
+                WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT,
                 VIS_CLASS,
                 w!("VIS_TASKBAR"),
                 WS_POPUP,
@@ -94,10 +97,18 @@ impl Renderer {
                 None,
             )?;
 
-            ShowWindow(hwnd, SW_SHOWNORMAL);
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             let _ = UpdateWindow(hwnd);
 
+            // Place behind the taskbar so icons stay visible on top
+            let _ = SetWindowPos(
+                hwnd, taskbar_hwnd,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+
             self.hwnd = hwnd;
+            self.taskbar_hwnd = taskbar_hwnd;
             self.width = w;
             self.height = h;
             self.init_d2d_dc(w, h)?;
@@ -157,10 +168,11 @@ impl Renderer {
             let w = outer.right - outer.left;
             let h = outer.bottom - outer.top;
 
+            // Stay behind the taskbar window in Z-order
             let _ = SetWindowPos(
-                self.hwnd, HWND_TOP,
+                self.hwnd, self.taskbar_hwnd,
                 outer.left, outer.top, w, h,
-                SET_WINDOW_POS_FLAGS(0),
+                SWP_NOACTIVATE,
             );
 
             if w != self.width || h != self.height {
@@ -546,7 +558,7 @@ pub fn render_loop(
     let data_size = 256;
     let mut renderer = Renderer::new(data_size);
 
-    if let Err(e) = renderer.init_window(&outer) {
+    if let Err(e) = renderer.init_window(&outer, taskbar_info.taskbar_hwnd) {
         log::error!("Failed to init render window: {e}");
         return;
     }
